@@ -61,8 +61,8 @@ app.get('/api/revenue/:stockId', async (req, res) => {
             const twM = yymm.slice(-2);
             rows.push({
               period: twY + '/' + twM,
-              revenue: toNum(monthRow[1]),
-              cumRevenue: cumRow ? toNum(cumRow[1]) : 0,
+              revenue: toNum(monthRow[1]) * 1000,
+              cumRevenue: cumRow ? toNum(cumRow[1]) * 1000 : 0,
               yoy: yoyRow ? (parseFloat(yoyRow[1]) || 0) : 0,
             });
           }
@@ -111,7 +111,7 @@ app.get('/api/institutional/:stockId', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 財務報表 (季報) - 新 MOPS JSON API
+// 財務報表 (季報) - 新 MOPS JSON API，單位仟元 → 元
 app.get('/api/financial/:stockId', async (req, res) => {
   const { stockId } = req.params;
   const cacheKey = 'fin_' + stockId;
@@ -121,9 +121,7 @@ app.get('/api/financial/:stockId', async (req, res) => {
     const results = [];
     const periods = [];
     for (let y = twYear; y >= twYear - 3; y--) {
-      for (let s = 4; s >= 1; s--) {
-        periods.push({ year: y, season: s });
-      }
+      for (let s = 4; s >= 1; s--) { periods.push({ year: y, season: s }); }
     }
     for (let pi = 0; pi < periods.length; pi++) {
       if (results.length >= 8) break;
@@ -143,9 +141,9 @@ app.get('/api/financial/:stockId', async (req, res) => {
             const row = rows[ri];
             const label = row[0] ? row[0].trim() : '';
             const val = row[1] ? String(row[1]).replace(/,/g, '') : '0';
-            if (label === '營業收入合計') revenue = toNum(val);
-            if (label === '營業利益（損失）') opIncome = toNum(val);
-            if (label.indexOf('本期淨利') !== -1 && label.indexOf('歸') === -1) netIncome = toNum(val);
+            if (label === '營業收入合計') revenue = toNum(val) * 1000;
+            if (label === '營業利益（損失）') opIncome = toNum(val) * 1000;
+            if (label.indexOf('本期淨利') !== -1 && label.indexOf('歸') === -1) netIncome = toNum(val) * 1000;
           }
           const epsRow = rows.find(function(r) {
             return r[0] && r[0].replace(/\s/g,'') === '基本每股盈餘' && r[1] && parseFloat(r[1]) !== 0;
@@ -164,7 +162,7 @@ app.get('/api/financial/:stockId', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 大盤三大法人合計 (回退至最近交易日)
+// 大盤三大法人合計
 app.get('/api/market', async (req, res) => {
   const cacheKey = 'market_overview';
   if (cache.has(cacheKey)) return res.json(cache.get(cacheKey));
@@ -199,7 +197,6 @@ app.get('/api/market', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 清除快取
 app.delete('/api/cache', function(_, res) {
   cache.flushAll();
   res.json({ message: 'Cache cleared' });
