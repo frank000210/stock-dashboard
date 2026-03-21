@@ -252,7 +252,7 @@ function calcRSI(closes, period = 14) {
     avgGain = (avgGain * (period - 1) + (ch > 0 ? ch : 0)) / period;
     avgLoss = (avgLoss * (period - 1) + (ch < 0 ? Math.abs(ch) : 0)) / period;
     const rs2 = avgLoss === 0 ? 100 : avgGain / avgLoss;
-    result.push(*+100 - 100 / (1 + rs2)).toFixed(2));
+    result.push(+(100 - 100 / (1 + rs2)).toFixed(2));
   }
   return result;
 }
