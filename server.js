@@ -1,5 +1,3 @@
-HELLO_TEST_LINE_1
-HELLO_TEST_LINE_2
 const express = require('express');
 const axios = require('axios');
 const NodeCache = require('node-cache');
@@ -36,7 +34,7 @@ function toNum(str) {
   return parseInt(String(str).replace(/,/g, '')) || 0;
 }
 
-// ─── 月營收 ────────────────────────────────────────────────
+// âââ æçæ¶ ââââââââââââââââââââââââââââââââââââââââââââââââ
 app.get('/api/revenue/:stockId', async (req, res) => {
   const { stockId } = req.params;
   const cacheKey = `revenue_${stockId}`;
@@ -64,16 +62,16 @@ app.get('/api/revenue/:stockId', async (req, res) => {
         const result = resp.data?.result;
         if (resp.data?.code === 200 && result?.data) {
           const yymm = result.yymm || '';
-          const monthRow = result.data.find(r => r[0] === '本月');
-          const cumRow = result.data.find(r => r[0] === '累計');
-          const yoyRow = result.data.find(r => r[0] && r[0].includes('去年同期'));
+          const monthRow = result.data.find(r => r[0] === 'æ¬æ');
+          const cumRow = result.data.find(r => r[0] === 'ç´¯è¨');
+          const yoyRow = result.data.find(r => r[0] && r[0].includes('å»å¹´åæ'));
 
           if (monthRow && toNum(monthRow[1]) > 0) {
             const twY = yymm.slice(0, yymm.length - 2);
             const twM = yymm.slice(-2);
             rows.push({
               period: `${twY}/${twM}`,
-              revenue: toNum(monthRow[1]) * 1000,
+              revenue: toNum(monthRow[1]) * 1000,      // ä»å â å
               cumRevenue: cumRow ? toNum(cumRow[1]) * 1000 : 0,
               yoy: yoyRow ? parseFloat(yoyRow[1]) || 0 : 0,
             });
@@ -90,7 +88,7 @@ app.get('/api/revenue/:stockId', async (req, res) => {
   }
 });
 
-// ─── 三大法人 (個股) ─────────────────────────────────────
+// âââ ä¸å¤§æ³äºº (åè¡) âââââââââââââââââââââââââââââââââââââ
 app.get('/api/institutional/:stockId', async (req, res) => {
   const { stockId } = req.params;
   const cacheKey = `inst_${stockId}`;
@@ -138,7 +136,7 @@ app.get('/api/institutional/:stockId', async (req, res) => {
   }
 });
 
-// ─── 財務報表 (季報) ─────────────────────────────────────
+// âââ è²¡åå ±è¡¨ (å­£å ±) âââââââââââââââââââââââââââââââââââââ
 app.get('/api/financial/:stockId', async (req, res) => {
   const { stockId } = req.params;
   const cacheKey = `fin_${stockId}`;
@@ -148,6 +146,7 @@ app.get('/api/financial/:stockId', async (req, res) => {
     const twYear = getTWYear();
     const results = [];
 
+    // Build list of (year, season) to try, newest first
     const periods = [];
     for (let y = twYear; y >= twYear - 3; y--) {
       for (let s = 4; s >= 1; s--) {
@@ -182,17 +181,19 @@ app.get('/api/financial/:stockId', async (req, res) => {
             const label = row[0] ? row[0].trim() : '';
             const val = row[1] ? String(row[1]).replace(/,/g, '') : '0';
 
-            if (label === '營業收入合計') revenue = toNum(val) * 1000;
-            if (label === '營業利益（損失）') opIncome = toNum(val) * 1000;
-            if (label.includes('本期淨利') && !label.includes('歸')) netIncome = toNum(val) * 1000;
-            if (label === '基本每股盈餘') eps = parseFloat(val) || 0;
-            if (label.replace(/\s/g, '') === '基本每股盈餘' && eps === 0) {
+            if (label === 'çæ¥­æ¶å¥åè¨') revenue = toNum(val) * 1000;      // ä»å â å
+            if (label === 'çæ¥­å©çï¼æå¤±ï¼') opIncome = toNum(val) * 1000;
+            if (label.includes('æ¬ææ·¨å©') && !label.includes('æ­¸')) netIncome = toNum(val) * 1000;
+            if (label === 'åºæ¬æ¯è¡çé¤') eps = parseFloat(val) || 0;
+            // sub-row with leading whitespace
+            if (label.replace(/\s/g, '') === 'åºæ¬æ¯è¡çé¤' && eps === 0) {
               eps = parseFloat(val) || 0;
             }
           }
 
+          // Try finding EPS from indented sub-row if top-level is empty
           if (eps === 0) {
-            const epsRow = rows.find(r => r[0] && r[0].replace(/\s/g, '') === '基本每股盈餘' && r[1] && parseFloat(r[1]) !== 0);
+            const epsRow = rows.find(r => r[0] && r[0].replace(/\s/g, '') === 'åºæ¬æ¯è¡çé¤' && r[1] && parseFloat(r[1]) !== 0);
             if (epsRow) eps = parseFloat(epsRow[1]) || 0;
           }
 
@@ -218,7 +219,7 @@ app.get('/api/financial/:stockId', async (req, res) => {
   }
 });
 
-// ─── 大盤三大法人合計 ─────────────────────────────────────
+// âââ å¤§ç¤ä¸å¤§æ³äººåè¨ âââââââââââââââââââââââââââââââââââââ
 app.get('/api/market', async (req, res) => {
   const cacheKey = 'market_overview';
   if (cache.has(cacheKey)) return res.json(cache.get(cacheKey));
@@ -227,6 +228,7 @@ app.get('/api/market', async (req, res) => {
     const now = new Date();
     let result = null;
 
+    // Try last 5 days to find most recent trading day
     for (let back = 0; back < 5 && !result; back++) {
       const d = new Date(now);
       d.setDate(d.getDate() - back);
@@ -262,7 +264,7 @@ app.get('/api/market', async (req, res) => {
   }
 });
 
-// ─── K線資料 ─────────────────────────────────────────────
+// âââ Kç·è³æ âââââââââââââââââââââââââââââââââââââââââââââ
 app.get('/api/kline/:stockId', async (req, res) => {
   const { stockId } = req.params;
   const cacheKey = `kline_${stockId}`;
@@ -272,6 +274,7 @@ app.get('/api/kline/:stockId', async (req, res) => {
     const allData = [];
     const now = new Date();
 
+    // Try TWSE (TSE listed stocks) - fetch 6 months
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const dateStr = formatDate(d);
@@ -298,6 +301,7 @@ app.get('/api/kline/:stockId', async (req, res) => {
       } catch (_) {}
     }
 
+    // If no TSE data, try TPEX (OTC listed stocks)
     if (allData.length === 0) {
       for (let i = 5; i >= 0; i--) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -336,7 +340,7 @@ app.get('/api/kline/:stockId', async (req, res) => {
   }
 });
 
-// ─── 即時報價 ─────────────────────────────────────────────
+// âââ å³æå ±å¹ âââââââââââââââââââââââââââââââââââââââââââââ
 app.get('/api/quote/:stockId', async (req, res) => {
   const { stockId } = req.params;
   const cacheKey = `quote_${stockId}`;
@@ -381,12 +385,12 @@ app.get('/api/quote/:stockId', async (req, res) => {
   }
 });
 
-// ─── 清除快取 ─────────────────────────────────────────────
+// âââ æ¸é¤å¿«å âââââââââââââââââââââââââââââââââââââââââââââ
 app.delete('/api/cache', (_, res) => {
   cache.flushAll();
   res.json({ message: 'Cache cleared' });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 股市儀錶板運行於 port ${PORT}`);
+  console.log(`ð è¡å¸åé¶æ¿éè¡æ¼ port ${PORT}`);
 });
