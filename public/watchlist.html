@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>èªé¸è¡ â å°è¡åé¶æ¿</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --surface: #ffffff;
+      --border: #e1e4e8;
+      --text: #1a1a2e;
+      --muted: #636e80;
+      --accent: #1d72b8;
+      --up: #00b386;
+      --dn: #e63946;
+      --up-bg: #e8faf4;
+      --dn-bg: #fdecea;
+    }
+    * { box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    /* Navbar */
+    .navbar { background: #fff; border-bottom: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+    .navbar-brand { color: var(--accent) !important; font-weight: 700; font-size: 1.1rem; text-decoration: none; }
+    .back-link { color: var(--muted); font-size: 0.9rem; text-decoration: none; display: flex; align-items: center; gap: 5px; padding: 5px 12px; border: 1px solid var(--border); border-radius: 8px; transition: all .15s; }
+    .back-link:hover { color: var(--accent); border-color: var(--accent); }
+
+    /* Ticker tape */
+    .ticker-wrap { background: var(--text); color: #fff; overflow: hidden; white-space: nowrap; font-size: 0.8rem; padding: 5px 0; position: relative; }
+    .ticker-wrap::before, .ticker-wrap::after { content: ''; position: absolute; top: 0; bottom: 0; width: 40px; z-index: 2; }
+    .ticker-wrap::before { left: 0; background: linear-gradient(to right, var(--text), transparent); }
+    .ticker-wrap::after  { right: 0; background: linear-gradient(to left, var(--text), transparent); }
+    .ticker-inner { display: inline-flex; gap: 0; animation: ticker-scroll 30s linear infinite; }
+    .ticker-item { display: inline-flex; align-items: center; gap: 8px; padding: 0 24px; border-right: 1px solid rgba(255,255,255,.15); }
+    .ticker-item .t-name { color: #a8b9cc; }
+    .ticker-item .t-price { font-weight: 600; }
+    .ticker-item .t-up { color: #4ecca3; }
+    .ticker-item .t-dn { color: #ff6b6b; }
+    @keyframes ticker-scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+
+    /* Page header */
+    .page-header { padding: 28px 0 12px; }
+    .page-title { font-size: 1.5rem; font-weight: 700; color: var(--text); }
+    .page-sub { color: var(--muted); font-size: 0.88rem; margin-top: 3px; }
+
+    /* Add stock bar */
+    .add-bar { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+    .add-input { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 9px 14px; font-size: 0.95rem; color: var(--text); background: var(--bg); outline: none; transition: border-color .15s; max-width: 260px; }
+    .add-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(29,114,184,.12); }
+    .add-input::placeholder { color: #b0b8c4; }
+    .btn-add { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 9px 22px; font-weight: 600; font-size: 0.92rem; cursor: pointer; transition: background .15s; white-space: nowrap; }
+    .btn-add:hover { background: #1560a0; }
+    .add-hint { color: var(--muted); font-size: 0.82rem; }
+
+    /* Stock grid */
+    .stock-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    @media (max-width: 1100px) { .stock-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 680px)  { .stock-grid { grid-template-columns: 1fr; } }
+
+    /* Stock card */
+    .stock-card {
+      background: #fff; border: 1px solid var(--border); border-radius: 12px;
+      padding: 18px 20px; cursor: pointer; position: relative;
+      transition: box-shadow .15s, border-color .15s;
+      text-decoration: none; display: block; color: inherit;
+    }
+    .stock-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.09); border-color: #c2cad4; color: inherit; }
+    .stock-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+    .stock-code { font-size: 1.1rem; font-weight: 700; color: var(--text); }
+    .stock-name-text { font-size: 0.82rem; color: var(--muted); margin-top: 2px; }
+    .btn-delete {
+      background: none; border: none; color: #c9d1d9; cursor: pointer;
+      padding: 4px 6px; border-radius: 6px; font-size: 1rem; line-height: 1;
+      transition: all .15s; position: absolute; top: 14px; right: 14px;
+    }
+    .btn-delete:hover { color: var(--dn); background: var(--dn-bg); }
+    .price-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+    .price-val { font-size: 1.7rem; font-weight: 700; }
+    .price-up  { color: var(--up); }
+    .price-dn  { color: var(--dn); }
+    .price-flat { color: var(--muted); }
+    .change-badge { font-size: 0.82rem; font-weight: 600; padding: 2px 9px; border-radius: 20px; }
+    .badge-up { background: var(--up-bg); color: var(--up); }
+    .badge-dn { background: var(--dn-bg); color: var(--dn); }
+    .badge-flat { background: #f0f2f5; color: var(--muted); }
+    .ohlv-row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .ohlv-item { font-size: 0.78rem; color: var(--muted); }
+    .ohlv-item strong { color: var(--text); font-weight: 600; }
+    .card-loading { display: flex; align-items: center; justify-content: center; min-height: 80px; color: var(--muted); font-size: 0.85rem; gap: 8px; }
+    .spinner-sm { width: 16px; height: 16px; border: 2px solid #dde1e7; border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Empty state */
+    .empty-state { text-align: center; padding: 64px 24px; }
+    .empty-icon { font-size: 3.5rem; margin-bottom: 16px; opacity: .6; }
+    .empty-title { font-size: 1.1rem; font-weight: 600; color: var(--muted); }
+    .empty-sub { color: #b0b8c4; font-size: 0.88rem; margin-top: 6px; }
+
+    /* Toast */
+    .toast-msg { position: fixed; bottom: 24px; right: 24px; background: #1a1a2e; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 0.88rem; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 9999; }
+    .toast-msg.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar px-4 py-2 d-flex align-items-center gap-3">
+  <a href="/" class="navbar-brand">ð å°è¡åé¶æ¿</a>
+  <span style="color:#ccc;font-size:1.2rem">âº</span>
+  <span style="font-size:1rem;font-weight:600;color:#1a1a2e">â­ èªé¸è¡</span>
+  <div class="ms-auto">
+    <a href="/" class="back-link">â è¿ååé¶æ¿</a>
+  </div>
+</nav>
+
+<!-- Ticker tape -->
+<div class="ticker-wrap" id="tickerWrap">
+  <div class="ticker-inner" id="tickerInner">
+    <div class="ticker-item"><span class="t-name">è¼å¥ä¸­â¦</span></div>
+  </div>
+</div>
+
+<div class="container py-0 px-4" style="max-width:1200px">
+
+  <!-- Page header -->
+  <div class="page-header">
+    <div class="page-title">èªé¸è¡æ¸å®</div>
+    <div class="page-sub" id="lastUpdate">é»é¸è¡ç¥¨æ¥çè©³ç´°åé¶æ¿</div>
+  </div>
+
+  <!-- Add stock -->
+  <div class="add-bar">
+    <input id="addInput" class="add-input" type="text" placeholder="è¼¸å¥è¡ç¥¨ä»£è (å¦ 2330)" maxlength="6" />
+    <button class="btn-add" onclick="addStock()">ï¼ æ°å¢</button>
+    <span class="add-hint">æ°å¢å¾èªåæåå³æå ±å¹</span>
+  </div>
+
+  <!-- Grid -->
+  <div id="stockGrid"></div>
+
+</div>
+
+<div class="toast-msg" id="toastMsg"></div>
+
+<script>
+const STORAGE_KEY = 'wl_stocks_v2';
+
+// Default watchlist
+const DEFAULT_STOCKS = [
+  { id: '2330', name: 'TSMCå°ç©é»' },
+  { id: '2317', name: 'é´»æµ·' },
+  { id: '2454', name: 'è¯ç¼ç§' },
+];
+
+function getStocks() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
+function saveStocks(list) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+}
+
+let stocks = getStocks();
+if (!stocks) {
+  stocks = DEFAULT_STOCKS.map(s => ({ id: s.id, name: s.name }));
+  saveStocks(stocks);
+}
+
+// Quote cache
+const quoteCache = {};
+
+function showToast(msg, dur = 2200) {
+  const el = document.getElementById('toastMsg');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), dur);
+}
+
+function addStock() {
+  const input = document.getElementById('addInput');
+  const id = input.value.trim().toUpperCase();
+  if (!id) return;
+  if (stocks.find(s => s.id === id)) { showToast('æ­¤è¡ç¥¨å·²å¨æ¸å®ä¸­'); return; }
+  stocks.push({ id, name: id });
+  saveStocks(stocks);
+  input.value = '';
+  renderGrid();
+  // Fetch quote to update name
+  fetchQuote(id);
+}
+
+arync function fetchQuote(id) {
+  try {
+    const d = await fetch(`/api/quote/${id}`).then(r => r.json());
+    if (d.name && d.name !== id) {
+      // Update name in stocks
+      const s = stocks.find(s => s.id === id);
+      if (s) { s.name = d.name; saveStocks(stocks); }
+    }
+    quoteCache[id] = d;
+    updateCard(id, d);
+    updateTicker();
+  } catch (e) {
+    quoteCache[id] = { error: true };
+    updateCard(id, null);
+  }
+}
+
+function deleteStock(id, e) {
+  e.preventDefault();
+  e.stopPropagation();
+  stocks = stocks.filter(s => s.id !== id);
+  saveStocks(stocks);
+  renderGrid();
+  updateTicker();
+}
+
+function updateCard(id, q) {
+  const el = document.getElementById('card-' + id);
+  if (!el) return;
+  const nameEl = el.querySelector('.stock-name-text');
+  const bodyEl = el.querySelector('.card-body-content');
+  if (!bodyEl) return;
+
+  if (q && !q.error && q.price > 0) {
+    const isUp = q.change > 0, isDn = q.change < 0;
+    const pcls = isUp ? 'price-up' : isDn ? 'price-dn' : 'price-flat';
+    const bcls = isUp ? 'badge-up' : isDn ? 'badge-dn' : 'badge-flat';
+    const sign = isUp ? '+' : '';
+    if (nameEl && q.name && q.name !== id) nameEl.textContent = q.name;
+    bodyEl.innerHTML = `
+      <div class="price-row">
+        <span class="price-val ${pcls}">${q.price.toFixed(2)}</span>
+        <span class="change-badge ${bcls}">${sign}${q.change.toFixed(2)} (${sign}${q.changePct.toFixed(2)}%)</span>
+      </div>
+      <div class="ohlv-row">
+        <div class="ohlv-item">é <strong>${q.open > 0 ? q.open.toFixed(2) : 'â'}</strong></div>
+        <div class="ohlv-item">é« <strong>${q.high > 0 ? q.high.toFixed(2) : 'â'}</strong></div>
+        <div class="ohlv-item">ä½ <strong>${q.low > 0 ? q.low.toFixed(2) : 'â'}</strong></div>
+        <div class="ohlv-item">é <strong>${fmtVol(q.volume)}</strong></div>
+      </div>`;
+  } else if (q && q.error) {
+    bodyEl.innerHTML = `<div style="color:#b0b8c4;font-size:.85rem">ç¡æ³åå¾è³æ</div>`;
+  } else {
+    bodyEl.innerHTML = `<div class="card-loading"><div class="spinner-sm"></div> è¼å¥ä¸­â¦</div>`;
+  }
+}
+
+function fmtVol(v) {
+  if (!v || v === 0) return 'â';
+  if (v >= 1e8) return (v / 1e8).toFixed(1) + 'å';
+  if (v >= 1e4) return (v / 1e4).toFixed(0) + 'è¬';
+  return v.toLocaleString();
+}
+
+function renderGrid() {
+  const grid = document.getElementById('stockGrid');
+  if (stocks.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">ð</div>
+        <div class="empty-title">å°ç¡èªé¸è¡</div>
+        <div class="empty-sub">è«å¨ä¸æ¹è¼¸å¥è¡ç¥¨ä»£èæ°å¢</div>
+      </div>`;
+    return;
+  }
+
+  grid.innerHTML = `<div class="stock-grid">${stocks.map(s => `
+    <a href="/?stock=${s.id}" class="stock-card" id="card-${s.id}">
+      <div class="stock-card-header">
+        <div>
+          <div class="stock-code">${s.id}</div>
+          <div class="stock-name-text">${s.name || s.id}</div>
+        </div>
+        <button class="btn-delete" onclick="deleteStock('${s.id}', event)" title="åªé¤">â</button>
+      </div>
+      <div class="card-body-content">
+        <div class="card-loading"><div class="spinner-sm"></div> è¼å¥ä¸­â¦</div>
+      </div>
+    </a>
+  `).join('')}</div>`;
+
+  // Load quotes
+  stocks.forEach(s => {
+    if (quoteCache[s.id]) {
+      updateCard(s.id, quoteCache[s.id]);
+    } else {
+      fetchQuote(s.id);
+    }
+  });
+}
+
+function updateTicker() {
+  const items = stocks.map(s => {
+    const q = quoteCache[s.id];
+    if (!q || q.error || !q.price) return null;
+    const isUp = q.change >= 0;
+    const sign = isUp ? '+' : '';
+    return `<div class="ticker-item">
+      <span class="t-name">${s.id}</span>
+      <span class="t-price">${q.price.toFixed(2)}</span>
+      <span class="${isUp ? 't-up' : 't-dn'}">${sign}${q.changePct.toFixed(2)}%</span>
+    </div>`;
+  }).filter(Boolean);
+
+  if (items.length === 0) return;
+  // Duplicate for seamless loop
+  const inner = document.getElementById('tickerInner');
+  const content = items.join('');
+  inner.innerHTML = content + content; // doubled for seamless scroll
+
+  // Adjust animation duration based on content width
+  const totalWidth = inner.scrollWidth;
+  inner.style.animationDuration = Math.max(20, totalWidth / 80) + 's';
+}
+
+document.getElementById('addInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') addStock();
+});
+
+// Auto-refresh quotes every 60 seconds
+function refreshAll() {
+  stocks.forEach(s => fetchQuote(s.id));
+  document.getElementById('lastUpdate').textContent =
+    'æå¾æ´æ°ï¼' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+// Init
+renderGrid();
+setInterval(refreshAll, 60000);
+</script>
+</body>
+</html>
