@@ -1,0 +1,15 @@
+{
+  "name": "stock-dashboard",
+  "version": "1.0.0",
+  "description": "台股儀錶板 - 月營收、三大法人買賣超、財務報表",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "cheerio": "^1.0.0",
+    "express": "^4.19.2",
+    "node-cache": "^5.1.2"
+  }
+}
