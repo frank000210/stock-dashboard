@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>台股儀錶板</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d29922;
+    }
+    * { box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+    .navbar { background: var(--card) !important; border-bottom: 1px solid var(--border); }
+    .navbar-brand { color: var(--accent) !important; font-weight: 700; font-size: 1.2rem; }
+    .search-box { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 16px; width: 220px; font-size: 0.95rem; }
+    .search-box:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(88,166,255,.2); }
+    .btn-search { background: var(--accent); border: none; color: #fff; padding: 8px 18px; border-radius: 8px; font-weight: 600; cursor: pointer; }
+    .btn-search:hover { background: #79b8ff; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+    .card-title { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+    .card-value { font-size: 1.6rem; font-weight: 700; color: var(--text); }
+    .badge-up { background: rgba(63,185,80,.15); color: var(--green); padding: 2px 8px; border-radius: 20px; font-size: 0.8rem; }
+    .badge-dn { background: rgba(248,81,73,.15); color: var(--red); padding: 2px 8px; border-radius: 20px; font-size: 0.8rem; }
+    .section-title { font-size: 1rem; font-weight: 600; color: var(--accent); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .section-title::before { content: ''; display: block; width: 3px; height: 16px; background: var(--accent); border-radius: 2px; }
+    .chart-wrap { position: relative; height: 260px; }
+    .table-fin { width: 100%; font-size: 0.85rem; border-collapse: collapse; }
+    .table-fin th { color: var(--muted); font-weight: 600; padding: 8px 12px; border-bottom: 1px solid var(--border); text-align: right; }
+    .table-fin th:first-child { text-align: left; }
+    .table-fin td { padding: 7px 12px; border-bottom: 1px solid rgba(48,54,61,.5); text-align: right; }
+    .table-fin td:first-child { text-align: left; color: var(--muted); }
+    .table-fin tr:hover td { background: rgba(88,166,255,.05); }
+    .pos { color: var(--green); }
+    .neg { color: var(--red); }
+    .loading { display: flex; align-items: center; justify-content: center; height: 200px; color: var(--muted); font-size: 0.9rem; gap: 8px; }
+    .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .stock-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+    .stock-name { font-size: 1.4rem; font-weight: 700; }
+    .stock-id { color: var(--muted); font-size: 1rem; }
+    .inst-legend { display: flex; gap: 16px; font-size: 0.78rem; margin-bottom: 8px; }
+    .inst-legend span { display: flex; align-items: center; gap: 5px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .muted-text { color: var(--muted); font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar navbar-expand-lg px-4 py-2">
+  <span class="navbar-brand">📈 台股儀錶板</span>
+  <div class="d-flex align-items-center gap-2 ms-auto">
+    <input id="stockInput" class="search-box" type="text" placeholder="輸入股票代號 (例: 2330)" value="2330" />
+    <button class="btn-search" onclick="loadAll()">查詢</button>
+  </div>
+</nav>
+
+<div class="container-fluid px-4 py-4">
+
+  <!-- Market Overview -->
+  <div id="marketSection" class="row g-3 mb-4">
+    <div class="col-12"><div class="muted-text">載入大盤資訊中…</div></div>
+  </div>
+
+  <!-- Stock Header -->
+  <div id="stockHeader" class="stock-header" style="display:none!important"></div>
+
+  <div class="row g-4">
+
+    <!-- 月營收 -->
+    <div class="col-xl-6">
+      <div class="card p-4 h-100">
+        <div class="section-title">月營收趨勢</div>
+        <div id="revenueArea">
+          <div class="loading"><div class="spinner"></div> 載入中…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 三大法人 -->
+    <div class="col-xl-6">
+      <div class="card p-4 h-100">
+        <div class="section-title">三大法人買賣超（近30交易日）</div>
+        <div id="instArea">
+          <div class="loading"><div class="spinner"></div> 載入中…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 財務報表 -->
+    <div class="col-12">
+      <div class="card p-4">
+        <div class="section-title">財務報表（近8季）</div>
+        <div id="finArea">
+          <div class="loading"><div class="spinner"></div> 載入中…</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ─── Chart defaults ───────────────────────────────────────
+Chart.defaults.color = '#8b949e';
+Chart.defaults.borderColor = '#30363d';
+Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
+
+let revenueChart, instChart, epsChart;
+
+function destroyChart(chart) {
+  if (chart) chart.destroy();
+}
+
+function fmt(n) {
+  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(1) + '億';
+  if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(0) + '萬';
+  return n.toLocaleString();
+}
+
+function fmtM(n) {
+  // format in millions (千萬)
+  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(2) + '億';
+  return (n / 1e4).toFixed(0) + '萬';
+}
+
+function colorSign(n) {
+  return n > 0 ? '<span class="pos">▲' + fmtM(n) + '</span>'
+               : n < 0 ? '<span class="neg">▼' + fmtM(Math.abs(n)) + '</span>'
+               : '–';
+}
+
+// ─── Market Overview ──────────────────────────────────────
+async function loadMarket() {
+  try {
+    const d = await fetch('/api/market').then(r => r.json());
+    const total = d.foreign + d.investment + d.dealer;
+    const cards = [
+      { label: '外資買賣超', val: d.foreign },
+      { label: '投信買賣超', val: d.investment },
+      { label: '自營商買賣超', val: d.dealer },
+      { label: '三大法人合計', val: total, bold: true },
+    ];
+    document.getElementById('marketSection').innerHTML = `
+      <div class="col-12"><div class="muted-text mb-2">大盤三大法人｜日期：${d.date || '–'}</div></div>
+      ${cards.map(c => `
+        <div class="col-6 col-md-3">
+          <div class="card p-3">
+            <div class="card-title">${c.label}</div>
+            <div class="card-value ${c.bold ? '' : ''}" style="font-size:${c.bold?'1.6':'1.3'}rem">
+              ${colorSign(c.val)}
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    `;
+  } catch (e) {
+    document.getElementById('marketSection').innerHTML = `<div class="col-12"><div class="muted-text">無法載入大盤資訊</div></div>`;
+  }
+}
+
+// ─── Revenue ─────────────────────────────────────────────
+async function loadRevenue(stockId) {
+  document.getElementById('revenueArea').innerHTML = `<div class="loading"><div class="spinner"></div> 載入月營收…</div>`;
+  try {
+    const d = await fetch(`/api/revenue/${stockId}`).then(r => r.json());
+    if (!d.data || d.data.length === 0) {
+      document.getElementById('revenueArea').innerHTML = `<div class="loading">查無資料</div>`; return;
+    }
+    const labels = d.data.map(r => r.period);
+    const values = d.data.map(r => r.revenue);
+    const yoys   = d.data.map(r => r.yoy);
+
+    document.getElementById('revenueArea').innerHTML = `<div class="chart-wrap"><canvas id="revenueChart"></canvas></div>
+      <div class="d-flex justify-content-between mt-2 muted-text px-1">
+        <span>最新月營收：<strong style="color:#c9d1d9">${fmtM(values[values.length-1])}</strong></span>
+        <span>YoY：<span class="${yoys[yoys.length-1]>=0?'pos':'neg'}">${yoys[yoys.length-1]?.toFixed(1)}%</span></span>
+      </div>`;
+
+    destroyChart(revenueChart);
+    const ctx = document.getElementById('revenueChart').getContext('2d');
+    revenueChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: '月營收',
+          data: values,
+          backgroundColor: values.map((_, i) => i === values.length - 1 ? 'rgba(88,166,255,.9)' : 'rgba(88,166,255,.45)'),
+          borderRadius: 4,
+          borderSkipped: false,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: {
+          callbacks: { label: ctx => ` ${fmtM(ctx.raw)}` }
+        }},
+        scales: {
+          x: { grid: { display: false } },
+          y: { grid: { color: '#21262d' }, ticks: { callback: v => fmtM(v) } }
+        }
+      }
+    });
+  } catch (e) {
+    document.getElementById('revenueArea').innerHTML = `<div class="loading">載入失敗：${e.message}</div>`;
+  }
+}
+
+// ─── Institutional ────────────────────────────────────────
+async function loadInstitutional(stockId) {
+  document.getElementById('instArea').innerHTML = `<div class="loading"><div class="spinner"></div> 載入三大法人…</div>`;
+  try {
+    const d = await fetch(`/api/institutional/${stockId}`).then(r => r.json());
+    if (!d.data || d.data.length === 0) {
+      document.getElementById('instArea').innerHTML = `<div class="loading">查無資料</div>`; return;
+    }
+    const labels = d.data.map(r => r.date.slice(5));
+    const foreign = d.data.map(r => r.foreign);
+    const invest  = d.data.map(r => r.investment);
+    const dealer  = d.data.map(r => r.dealer);
+
+    // Summary
+    const sumF = foreign.reduce((a,b)=>a+b,0);
+    const sumI = invest.reduce((a,b)=>a+b,0);
+    const sumD = dealer.reduce((a,b)=>a+b,0);
+
+    document.getElementById('instArea').innerHTML = `
+      <div class="inst-legend">
+        <span><span class="dot" style="background:#58a6ff"></span>外資</span>
+        <span><span class="dot" style="background:#3fb950"></span>投信</span>
+        <span><span class="dot" style="background:#d29922"></span>自營商</span>
+      </div>
+      <div class="chart-wrap"><canvas id="instChart"></canvas></div>
+      <div class="d-flex justify-content-around mt-2 muted-text text-center">
+        <span>外資累計<br/><strong style="color:#58a6ff">${colorSign(sumF)}</strong></span>
+        <span>投信累計<br/><strong style="color:#3fb950">${colorSign(sumI)}</strong></span>
+        <span>自營商累計<br/><strong style="color:#d29922">${colorSign(sumD)}</strong></span>
+      </div>`;
+
+    destroyChart(instChart);
+    const ctx = document.getElementById('instChart').getContext('2d');
+    instChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: '外資', data: foreign, backgroundColor: 'rgba(88,166,255,.7)', borderRadius: 2 },
+          { label: '投信', data: invest,  backgroundColor: 'rgba(63,185,80,.7)',  borderRadius: 2 },
+          { label: '自營商', data: dealer, backgroundColor: 'rgba(210,153,34,.7)', borderRadius: 2 },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: {
+          callbacks: { label: ctx => ` ${ctx.dataset.label}: ${fmtM(ctx.raw)}` }
+        }},
+        scales: {
+          x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 10 } },
+          y: { stacked: true, grid: { color: '#21262d' }, ticks: { callback: v => fmtM(v) } }
+        }
+      }
+    });
+  } catch (e) {
+    document.getElementById('instArea').innerHTML = `<div class="loading">載入失敗：${e.message}</div>`;
+  }
+}
+
+// ─── Financial ────────────────────────────────────────────
+async function loadFinancial(stockId) {
+  document.getElementById('finArea').innerHTML = `<div class="loading"><div class="spinner"></div> 載入財務報表…</div>`;
+  try {
+    const d = await fetch(`/api/financial/${stockId}`).then(r => r.json());
+    if (!d.data || d.data.length === 0) {
+      document.getElementById('finArea').innerHTML = `<div class="loading">查無資料</div>`; return;
+    }
+    const rows = [...d.data].reverse();
+
+    const tableRows = rows.map(r => `
+      <tr>
+        <td>${r.period}</td>
+        <td>${fmtM(r.revenue)}</td>
+        <td>${fmtM(r.opIncome)}</td>
+        <td>${fmtM(r.netIncome)}</td>
+        <td class="${r.eps >= 0 ? 'pos' : 'neg'}">${r.eps.toFixed(2)}</td>
+        <td class="${r.revenue ? (r.opIncome/r.revenue*100).toFixed(1)>0?'pos':'neg' : ''}">${r.revenue ? (r.opIncome/r.revenue*100).toFixed(1)+'%' : '–'}</td>
+      </tr>
+    `).join('');
+
+    document.getElementById('finArea').innerHTML = `
+      <div class="row g-4">
+        <div class="col-lg-7">
+          <div style="overflow-x:auto">
+            <table class="table-fin">
+              <thead>
+                <tr>
+                  <th>季度</th>
+                  <th>營業收入</th>
+                  <th>營業利益</th>
+                  <th>本期淨利</th>
+                  <th>EPS</th>
+                  <th>營益率</th>
+                </tr>
+              </thead>
+              <tbody>${tableRows}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="col-lg-5">
+          <div style="font-size:.75rem;color:var(--muted);margin-bottom:6px">EPS 趨勢（元）</div>
+          <div class="chart-wrap" style="height:200px"><canvas id="epsChart"></canvas></div>
+        </div>
+      </div>`;
+
+    destroyChart(epsChart);
+    const ctx = document.getElementById('epsChart').getContext('2d');
+    epsChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: rows.map(r => r.period),
+        datasets: [{
+          label: 'EPS',
+          data: rows.map(r => r.eps),
+          backgroundColor: rows.map(r => r.eps >= 0 ? 'rgba(63,185,80,.7)' : 'rgba(248,81,73,.7)'),
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: {
+          callbacks: { label: ctx => ` EPS: ${ctx.raw.toFixed(2)} 元` }
+        }},
+        scales: {
+          x: { grid: { display: false } },
+          y: { grid: { color: '#21262d' } }
+        }
+      }
+    });
+  } catch (e) {
+    document.getElementById('finArea').innerHTML = `<div class="loading">載入失敗：${e.message}</div>`;
+  }
+}
+
+// ─── Load All ─────────────────────────────────────────────
+function loadAll() {
+  const stockId = document.getElementById('stockInput').value.trim();
+  if (!stockId) return;
+  loadRevenue(stockId);
+  loadInstitutional(stockId);
+  loadFinancial(stockId);
+}
+
+document.getElementById('stockInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') loadAll();
+});
+
+// Init
+loadMarket();
+loadAll();
+</script>
+</body>
+</html>
