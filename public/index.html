@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>台股儀錶板</title>
+  <title>å°è¡åé¶æ¿</title>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <style>
     :root {
@@ -22,6 +23,8 @@
     body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
     .navbar { background: var(--card) !important; border-bottom: 1px solid var(--border); }
     .navbar-brand { color: var(--accent) !important; font-weight: 700; font-size: 1.2rem; }
+    .nav-link-wl { color: var(--muted) !important; font-size: 0.9rem; text-decoration: none; padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px; transition: all .15s; }
+    .nav-link-wl:hover { color: var(--accent) !important; border-color: var(--accent); }
     .search-box { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 16px; width: 220px; font-size: 0.95rem; }
     .search-box:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(88,166,255,.2); }
     .btn-search { background: var(--accent); border: none; color: #fff; padding: 8px 18px; border-radius: 8px; font-weight: 600; cursor: pointer; }
@@ -52,16 +55,26 @@
     .inst-legend span { display: flex; align-items: center; gap: 5px; }
     .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
     .muted-text { color: var(--muted); font-size: 0.8rem; }
+    /* Indicator toggle buttons */
+    .ind-toggles { display: flex; flex-wrap: wrap; gap: 6px; }
+    .btn-ind {
+      background: transparent; border: 1px solid var(--border); color: var(--muted);
+      padding: 3px 11px; border-radius: 20px; font-size: 0.75rem; cursor: pointer; transition: all .15s;
+    }
+    .btn-ind.active { background: rgba(88,166,255,.15); border-color: var(--accent); color: var(--accent); }
+    .btn-ind:hover:not(.active) { border-color: #8b949e; color: var(--text); }
+    #klineChart { width: 100%; transition: height .2s; }
   </style>
 </head>
 <body>
 
 <!-- Navbar -->
 <nav class="navbar navbar-expand-lg px-4 py-2">
-  <span class="navbar-brand">📈 台股儀錶板</span>
-  <div class="d-flex align-items-center gap-2 ms-auto">
-    <input id="stockInput" class="search-box" type="text" placeholder="輸入股票代號 (例: 2330)" value="2330" />
-    <button class="btn-search" onclick="loadAll()">查詢</button>
+  <span class="navbar-brand">ð å°è¡åé¶æ¿</span>
+  <div class="d-flex align-items-center gap-3 ms-auto">
+    <a href="/watchlist.html" class="nav-link-wl">â­ èªé¸è¡</a>
+    <input id="stockInput" class="search-box" type="text" placeholder="è¼¸å¥è¡ç¥¨ä»£è (ä¾: 2330)" value="2330" />
+    <button class="btn-search" onclick="loadAll()">æ¥è©¢</button>
   </div>
 </nav>
 
@@ -69,122 +82,441 @@
 
   <!-- Market Overview -->
   <div id="marketSection" class="row g-3 mb-4">
-    <div class="col-12"><div class="muted-text">載入大盤資訊中…</div></div>
+    <div class="col-12"><div class="muted-text">è¼å¥å¤§ç¤è³è¨ä¸­â¦</div></div>
   </div>
 
-  <!-- Stock Header -->
-  <div id="stockHeader" class="stock-header" style="display:none!important"></div>
+  <!-- K-Line Chart -->
+  <div class="card p-3 mb-4">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+      <div class="section-title mb-0" style="margin-bottom:0!important">è¡å¹Kç·å</div>
+      <div class="ind-toggles" id="klineToggles">
+        <button class="btn-ind active" data-key="ma5">MA5</button>
+        <button class="btn-ind active" data-key="ma10">MA10</button>
+        <button class="btn-ind active" data-key="ma20">MA20</button>
+        <button class="btn-ind" data-key="ma60">MA60</button>
+        <button class="btn-ind" data-key="bb">å¸æ</button>
+        <button class="btn-ind active" data-key="vol">æäº¤é</button>
+        <button class="btn-ind active" data-key="macd">MACD</button>
+        <button class="btn-ind active" data-key="kd">KD</button>
+        <button class="btn-ind" data-key="rsi">RSI</button>
+      </div>
+    </div>
+    <div id="klineArea">
+      <div class="loading"><div class="spinner"></div> è¼å¥Kç·â¦</div>
+    </div>
+  </div>
 
-  <div class="row g-4">
-
-    <!-- 月營收 -->
+  <!-- Revenue + Institutional -->
+  <div class="row g-4 mb-4">
     <div class="col-xl-6">
       <div class="card p-4 h-100">
-        <div class="section-title">月營收趨勢</div>
+        <div class="section-title">æçæ¶è¶¨å¢</div>
         <div id="revenueArea">
-          <div class="loading"><div class="spinner"></div> 載入中…</div>
+          <div class="loading"><div class="spinner"></div> è¼å¥ä¸­â¦</div>
         </div>
       </div>
     </div>
-
-    <!-- 三大法人 -->
     <div class="col-xl-6">
       <div class="card p-4 h-100">
-        <div class="section-title">三大法人買賣超（近30交易日）</div>
+        <div class="section-title">ä¸å¤§æ³äººè²·è³£è¶ï¼è¿30äº¤ææ¥ï¼</div>
         <div id="instArea">
-          <div class="loading"><div class="spinner"></div> 載入中…</div>
+          <div class="loading"><div class="spinner"></div> è¼å¥ä¸­â¦</div>
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- 財務報表 -->
+  <!-- Financial -->
+  <div class="row g-4">
     <div class="col-12">
       <div class="card p-4">
-        <div class="section-title">財務報表（近8季）</div>
+        <div class="section-title">è²¡åå ±è¡¨ï¼è¿8å­£ï¼</div>
         <div id="finArea">
-          <div class="loading"><div class="spinner"></div> 載入中…</div>
+          <div class="loading"><div class="spinner"></div> è¼å¥ä¸­â¦</div>
         </div>
       </div>
     </div>
-
   </div>
+
 </div>
 
 <script>
-// ─── Chart defaults ───────────────────────────────────────
+// âââ Chart defaults âââââââââââââââââââââââââââââââââââââââ
 Chart.defaults.color = '#8b949e';
 Chart.defaults.borderColor = '#30363d';
 Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
 
-let revenueChart, instChart, epsChart;
+let revenueChart, instChart, epsChart, klineChart, klineRawData;
 
-function destroyChart(chart) {
-  if (chart) chart.destroy();
-}
+const activeIndicators = {
+  ma5: true, ma10: true, ma20: true, ma60: false,
+  bb: false,
+  vol: true, macd: true, kd: true, rsi: false
+};
+
+function destroyChart(chart) { if (chart) chart.destroy(); }
 
 function fmt(n) {
-  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(1) + '億';
-  if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(0) + '萬';
+  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(1) + 'å';
+  if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(0) + 'è¬';
   return n.toLocaleString();
 }
-
 function fmtM(n) {
-  // format in millions (千萬)
-  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(2) + '億';
-  return (n / 1e4).toFixed(0) + '萬';
+  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(2) + 'å';
+  return (n / 1e4).toFixed(0) + 'è¬';
 }
-
 function colorSign(n) {
-  return n > 0 ? '<span class="pos">▲' + fmtM(n) + '</span>'
-               : n < 0 ? '<span class="neg">▼' + fmtM(Math.abs(n)) + '</span>'
-               : '–';
+  return n > 0 ? '<span class="pos">â²' + fmtM(n) + '</span>'
+               : n < 0 ? '<span class="neg">â¼' + fmtM(Math.abs(n)) + '</span>'
+               : 'â';
 }
 
-// ─── Market Overview ──────────────────────────────────────
+// âââ Indicator math âââââââââââââââââââââââââââââââââââââââ
+function calcMA(data, period) {
+  return data.map((_, i) => {
+    if (i < period - 1) return null;
+    const sum = data.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
+    return +(sum / period).toFixed(2);
+  });
+}
+
+function calcEMA(data, period) {
+  const k = 2 / (period + 1);
+  const result = [];
+  let ema = null, cnt = 0;
+  for (let i = 0; i < data.length; i++) {
+    if (ema === null) {
+      cnt++;
+      if (cnt < period) { result.push(null); continue; }
+      ema = data.slice(0, period).reduce((a, b) => a + b, 0) / period;
+      result.push(+ema.toFixed(3));
+    } else {
+      ema = data[i] * k + ema * (1 - k);
+      result.push(+ema.toFixed(3));
+    }
+  }
+  return result;
+}
+
+function calcMACD(closes, fast = 12, slow = 26, signal = 9) {
+  const emaFast = calcEMA(closes, fast);
+  const emaSlow = calcEMA(closes, slow);
+  const macdLine = emaFast.map((f, i) => (f !== null && emaSlow[i] !== null) ? +(f - emaSlow[i]).toFixed(3) : null);
+  const firstValid = macdLine.findIndex(v => v !== null);
+  const sigArr = new Array(firstValid).fill(null);
+  let sigEma = null, cnt = 0;
+  for (let i = firstValid; i < macdLine.length; i++) {
+    if (sigEma === null) {
+      cnt++;
+      if (cnt < signal) { sigArr.push(null); continue; }
+      sigEma = macdLine.slice(firstValid, firstValid + signal).reduce((a, b) => a + b, 0) / signal;
+      sigArr.push(+sigEma.toFixed(3));
+    } else {
+      sigEma = macdLine[i] * (2 / (signal + 1)) + sigEma * (1 - 2 / (signal + 1));
+      sigArr.push(+sigEma.toFixed(3));
+    }
+  }
+  const hist = macdLine.map((m, i) => (m !== null && sigArr[i] !== null) ? +(m - sigArr[i]).toFixed(3) : null);
+  return { macd: macdLine, signal: sigArr, hist };
+}
+
+function calcKD(highs, lows, closes, n = 9, mK = 3, mD = 3) {
+  const kArr = [], dArr = [];
+  let k = 50, d = 50;
+  for (let i = 0; i < closes.length; i++) {
+    if (i < n - 1) { kArr.push(null); dArr.push(null); continue; }
+    const hn = Math.max(...highs.slice(i - n + 1, i + 1));
+    const ln = Math.min(...lows.slice(i - n + 1, i + 1));
+    const rsv = hn === ln ? 50 : (closes[i] - ln) / (hn - ln) * 100;
+    k = (k * (mK - 1) + rsv) / mK;
+    d = (d * (mD - 1) + k) / mD;
+    kArr.push(+k.toFixed(2));
+    dArr.push(+d.toFixed(2));
+  }
+  return { k: kArr, d: dArr };
+}
+
+function calcRSI(closes, period = 14) {
+  if (closes.length < period + 1) return closes.map(() => null);
+  const result = new Array(period).fill(null);
+  let avgGain = 0, avgLoss = 0;
+  for (let i = 1; i <= period; i++) {
+    const ch = closes[i] - closes[i - 1];
+    if (ch > 0) avgGain += ch; else avgLoss += Math.abs(ch);
+  }
+  avgGain /= period; avgLoss /= period;
+  const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+  result.push(+(100 - 100 / (1 + rs)).toFixed(2));
+  for (let i = period + 1; i < closes.length; i++) {
+    const ch = closes[i] - closes[i - 1];
+    avgGain = (avgGain * (period - 1) + (ch > 0 ? ch : 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + (ch < 0 ? Math.abs(ch) : 0)) / period;
+    const rs2 = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    result.push(*+100 - 100 / (1 + rs2)).toFixed(2));
+  }
+  return result;
+}
+
+function calcBB(closes, period = 20, mult = 2) {
+  const upper = [], middle = [], lower = [];
+  for (let i = 0; i < closes.length; i++) {
+    if (i < period - 1) { upper.push(null); middle.push(null); lower.push(null); continue; }
+    const sl = closes.slice(i - period + 1, i + 1);
+    const mean = sl.reduce((a, b) => a + b, 0) / period;
+    const std = Math.sqrt(sl.reduce((s, v) => s + (v - mean) ** 2, 0) / period);
+    upper.push(+(mean + mult * std).toFixed(2));
+    middle.push(+mean.toFixed(2));
+    lower.push(+(mean - mult * std).toFixed(2));
+  }
+  return { upper, middle, lower };
+}
+
+// âââ K-Line Chart âââââââââââââââââââââââââââââââââââââââââ
+function getSubPanels() {
+  const panels = [];
+  if (activeIndicators.vol)  panels.push('vol');
+  if (activeIndicators.macd) panels.push('macd');
+  if (activeIndicators.kd)   panels.push('kd');
+  if (activeIndicators.rsi)  panels.push('rsi');
+  return panels;
+}
+
+function computeChartLayout(nSub) {
+  const mainH   = nSub === 0 ? 320 : nSub === 1 ? 290 : nSub === 2 ? 270 : nSub === 3 ? 250 : 230;
+  const subH    = 85;
+  const topPad  = 36;
+  const gap     = 8;
+  const dzH     = 40;
+  const totalH  = topPad + mainH + (nSub > 0 ? gap + nSub * (subH + gap) : 0) + dzH + 10;
+
+  const grids = [];
+  let top = topPad;
+  grids.push({ top, height: mainH, left: 68, right: 14 });
+  top += mainH + gap;
+  for (let i = 0; i < nSub; i++) {
+    grids.push({ top, height: subH, left: 68, right: 14 });
+    top += subH + gap;
+  }
+  return { grids, totalH, dzBottom: 8 };
+}
+
+function buildKlineOption(data) {
+  const dates  = data.map(d => d.date);
+  const opens  = data.map(d => d.open);
+  const highs  = data.map(d => d.high);
+  const lows   = data.map(d => d.low);
+  const closes = data.map(d => d.close);
+  const vols   = data.map(d => d.volume);
+
+  const ma5  = calcMA(closes, 5);
+  const ma10 = calcMA(closes, 10);
+  const ma20 = calcMA(closes, 20);
+  const ma60 = calcMA(closes, 60);
+  const bb   = calcBB(closes, 20, 2);
+  const macdRes = calcMACD(closes, 12, 26, 9);
+  const kdRes   = calcKD(highs, lows, closes, 9, 3, 3);
+  const rsiRes  = calcRSI(closes, 14);
+
+  const subPanels = getSubPanels();
+  const nSub = subPanels.length;
+  const { grids, totalH, dzBottom } = computeChartLayout(nSub);
+
+  document.getElementById('klineChart').style.height = totalH + 'px';
+
+  const xAxes = grids.map((_, i) => ({
+    type: 'category', data: dates, gridIndex: i,
+    axisLabel: { show: i === grids.length - 1, fontSize: 10, color: '#8b949e' },
+    axisLine: { lineStyle: { color: '#30363d' } },
+    splitLine: { show: false }, axisTick: { show: false },
+  }));
+
+  const subNames = { vol: 'é', macd: 'MACD', kd: 'KD', rsi: 'RSI' };
+  const yAxes = grids.map((_, i) => ({
+    type: 'value', gridIndex: i, scale: i === 0,
+    name: i === 0 ? '' : subNames[subPanels[i - 1]],
+    nameTextStyle: { color: '#8b949e', fontSize: 10 },
+    min: (i > 0 && subPanels[i - 1] === 'rsi') ? 0 : undefined,
+    max: (i > 0 && subPanels[i - 1] === 'rsi') ? 100 : undefined,
+    axisLabel: { fontSize: 10, color: '#8b949e', formatter: v => {
+      if (i > 0 && subPanels[i - 1] === 'vol') return Math.abs(v) >= 1e8 ? (v/1e8).toFixed(0)+'å' : (v/1e4).toFixed(0)+'è¬';
+      return v;
+    }},
+    splitLine: { lineStyle: { color: '#21262d' } },
+    axisLine: { show: false }, axisTick: { show: false },
+  }));
+
+  const series = [];
+
+  // Candlestick: [open, close, low, high]
+  series.push({
+    type: 'candlestick', name: 'Kç·', xAxisIndex: 0, yAxisIndex: 0,
+    data: closes.map((_, i) => [opens[i], closes[i], lows[i], highs[i]]),
+    itemStyle: { color: '#f85149', color0: '#3fb950', borderColor: '#f85149', borderColor0: '#3fb950' },
+  });
+
+  // MA lines on main
+  const maMap = { ma5: [ma5, '#ffd60a'], ma10: [ma10, '#ff9800'], ma20: [ma20, '#58a6ff'], ma60: [ma60, '#9f7be1'] };
+  for (const [key, [vals, color]] of Object.entries(maMap)) {
+    if (activeIndicators[key]) {
+      series.push({
+        type: 'line', name: key.toUpperCase(), xAxisIndex: 0, yAxisIndex: 0, data: vals,
+        lineStyle: { color, width: 1.2 }, showSymbol: false,
+      });
+    }
+  }
+
+  // Bollinger Bands
+  if (activeIndicators.bb) {
+    const bbStyle = { showSymbol: false, xAxisIndex: 0, yAxisIndex: 0 };
+    series.push({ type: 'line', name: 'BBä¸', data: bb.upper, lineStyle: { color: '#c9a227', width: 1, type: 'dashed' }, ...bbStyle });
+    series.push({ type: 'line', name: 'BBä¸­', data: bb.middle, lineStyle: { color: '#888', width: 1 }, ...bbStyle });
+    series.push({ type: 'line', name: 'BBä¸', data: bb.lower, lineStyle: { color: '#c9a227', width: 1, type: 'dashed' }, ...bbStyle });
+  }
+
+  // Sub-panels
+  subPanels.forEach((panel, pi) => {
+    const gi = pi + 1;
+    if (panel === 'vol') {
+      series.push({
+        type: 'bar', name: 'æäº¤é', xAxisIndex: gi, yAxisIndex: gi, barMaxWidth: 8,
+        data: vols.map((v, i) => ({ value: v, itemStyle: { color: closes[i] >= opens[i] ? 'rgba(248,81,73,.65)' : 'rgba(63,185,80,.65)' } })),
+      });
+    } else if (panel === 'macd') {
+      series.push(
+        { type: 'bar', name: 'MACDæ±', xAxisIndex: gi, yAxisIndex: gi, barMaxWidth: 8,
+          data: macdRes.hist.map(v => ({ value: v, itemStyle: { color: (v||0) >= 0 ? '#f85149' : '#3fb950' } })) },
+        { type: 'line', name: 'DIF', xAxisIndex: gi, yAxisIndex: gi, data: macdRes.macd, lineStyle: { color: '#58a6ff', width: 1.2 }, showSymbol: false },
+        { type: 'line', name: 'DEA', xAxisIndex: gi, yAxisIndex: gi, data: macdRes.signal, lineStyle: { color: '#ff9800', width: 1.2 }, showSymbol: false }
+      );
+    } else if (panel === 'kd') {
+      series.push(
+        { type: 'line', name: 'K', xAxisIndex: gi, yAxisIndex: gi, data: kdRes.k, lineStyle: { color: '#ffd60a', width: 1.2 }, showSymbol: false },
+        { type: 'line', name: 'D', xAxisIndex: gi, yAxisIndex: gi, data: kdRes.d, lineStyle: { color: '#ff9800', width: 1.2 }, showSymbol: false }
+      );
+    } else if (panel === 'rsi') {
+      series.push({
+        type: 'line', name: 'RSI', xAxisIndex: gi, yAxisIndex: gi, data: rsiRes,
+        lineStyle: { color: '#9f7be1', width: 1.5 }, showSymbol: false,
+        markLine: {
+          silent: true,
+          data: [{ yAxis: 70, name: 'è¶è²·' }, { yAxis: 30, name: 'è¶è³£' }],
+          lineStyle: { color: '#555', type: 'dashed', width: 1 },
+          label: { fontSize: 10, color: '#555' },
+        },
+      });
+    }
+  });
+
+  return {
+    backgroundColor: 'transparent',
+    animation: false,
+    grid: grids,
+    xAxis: xAxes,
+    yAxis: yAxes,
+    dataZoom: [
+      { type: 'inside', xAxisIndex: grids.map((_, i) => i), start: 40, end: 100 },
+      { type: 'slider', xAxisIndex: grids.map((_, i) => i), show: true,
+        bottom: dzBottom, height: 24,
+        borderColor: '#30363d', backgroundColor: '#161b22',
+        fillerColor: 'rgba(88,166,255,0.1)',
+        handleStyle: { color: '#58a6ff' },
+        textStyle: { color: '#8b949e', fontSize: 10 },
+        start: 40, end: 100 },
+    ],
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'cross', crossStyle: { color: '#444' } },
+      backgroundColor: '#1c2128', borderColor: '#30363d',
+      textStyle: { color: '#c9d1d9', fontSize: 11 },
+    },
+    legend: {
+      data: ['MA5','MA10','MA20','MA60','BBä¸','BBä¸­','BBä¸','DIF','DEA','K','D','RSI'],
+      textStyle: { color: '#8b949e', fontSize: 10 }, top: 4, right: 14, itemWidth: 16,
+    },
+    series,
+  };
+}
+
+async function loadKline(stockId) {
+  document.getElementById('klineArea').innerHTML = `<div class="loading"><div class="spinner"></div> è¼å¥Kç·è³æâ¦</div>`;
+  try {
+    const d = await fetch(`/api/kline/${stockId}`).then(r => r.json());
+    if (!d.data || d.data.length < 10) {
+      document.getElementById('klineArea').innerHTML = `<div class="loading">æ¥ç¡Kç·è³æ</div>`; return;
+    }
+    klineRawData = d.data;
+    document.getElementById('klineArea').innerHTML = `<div id="klineChart" style="width:100%;height:580px;"></div>`;
+
+    if (klineChart) { klineChart.dispose(); klineChart = null; }
+    klineChart = echarts.init(document.getElementById('klineChart'), null, { renderer: 'canvas' });
+    klineChart.setOption(buildKlineOption(klineRawData));
+  } catch (e) {
+    document.getElementById('klineArea').innerHTML = `<div class="loading">è¼å¥å¤±æï¼${e.message}</div>`;
+  }
+}
+
+// âââ Indicator toggles ââââââââââââââââââââââââââââââââââââ
+document.querySelectorAll('[data-key]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.key;
+    activeIndicators[key] = !activeIndicators[key];
+    btn.classList.toggle('active');
+    if (klineChart && klineRawData) {
+      klineChart.setOption(buildKlineOption(klineRawData), { notMerge: true });
+      klineChart.resize();
+    }
+  });
+});
+
+window.addEventListener('resize', () => { if (klineChart) klineChart.resize(); });
+
+// âââ Market Overview ââââââââââââââââââââââââââââââââââââââ
 async function loadMarket() {
   try {
     const d = await fetch('/api/market').then(r => r.json());
     const total = d.foreign + d.investment + d.dealer;
     const cards = [
-      { label: '外資買賣超', val: d.foreign },
-      { label: '投信買賣超', val: d.investment },
-      { label: '自營商買賣超', val: d.dealer },
-      { label: '三大法人合計', val: total, bold: true },
+      { label: 'å¤è³è²·è³£è¶', val: d.foreign },
+      { label: 'æä¿¡è²·è³£è¶', val: d.investment },
+      { label: 'èªçåè²·è³£è¶', val: d.dealer },
+      { label: 'ä¸å¤§æ³äººåè¨', val: total, bold: true },
     ];
     document.getElementById('marketSection').innerHTML = `
-      <div class="col-12"><div class="muted-text mb-2">大盤三大法人｜日期：${d.date || '–'}</div></div>
+      <div class="col-12"><div class="muted-text mb-2">å¤§ç¤ä¸å¤§æ³äººï½æ¥æï¼${d.date || 'â'}</div></div>
       ${cards.map(c => `
         <div class="col-6 col-md-3">
           <div class="card p-3">
             <div class="card-title">${c.label}</div>
-            <div class="card-value ${c.bold ? '' : ''}" style="font-size:${c.bold?'1.6':'1.3'}rem">
-              ${colorSign(c.val)}
-            </div>
+            <div class="card-value" style="font-size:${c.bold ? '1.6' : '1.3'}rem">${colorSign(c.val)}</div>
           </div>
         </div>
       `).join('')}
     `;
   } catch (e) {
-    document.getElementById('marketSection').innerHTML = `<div class="col-12"><div class="muted-text">無法載入大盤資訊</div></div>`;
+    document.getElementById('marketSection').innerHTML = `<div class="col-12"><div class="muted-text">ç¡æ³è¼å¥å¤§ç¤è³è¨</div></div>`;
   }
 }
 
-// ─── Revenue ─────────────────────────────────────────────
+// âââ Revenue âââââââââââââââââââââââââââââââââââââââââââââ
 async function loadRevenue(stockId) {
-  document.getElementById('revenueArea').innerHTML = `<div class="loading"><div class="spinner"></div> 載入月營收…</div>`;
+  document.getElementById('revenueArea').innerHTML = `<div class="loading"><div class="spinner"></div> è¼å¥æçæ¶â¦</div>`;
   try {
     const d = await fetch(`/api/revenue/${stockId}`).then(r => r.json());
     if (!d.data || d.data.length === 0) {
-      document.getElementById('revenueArea').innerHTML = `<div class="loading">查無資料</div>`; return;
+      document.getElementById('revenueArea').innerHTML = `<div class="loading">æ¥ç¡è³æ</div>`; return;
     }
-    const labels = d.data.map(r => r.period);
-    const values = d.data.map(r => r.revenue);
-    const yoys   = d.data.map(r => r.yoy);
+    // Reverse so oldest is left, newest is right
+    const rows = [...d.data].reverse();
+    const labels = rows.map(r => r.period);
+    const values = rows.map(r => r.revenue);
+    const yoys   = rows.map(r => r.yoy);
+    const latest = values[values.length - 1];
+    const latestYoy = yoys[yoys.length - 1];
 
-    document.getElementById('revenueArea').innerHTML = `<div class="chart-wrap"><canvas id="revenueChart"></canvas></div>
+    document.getElementById('revenueArea').innerHTML = `
+      <div class="chart-wrap"><canvas id="revenueChart"></canvas></div>
       <div class="d-flex justify-content-between mt-2 muted-text px-1">
-        <span>最新月營收：<strong style="color:#c9d1d9">${fmtM(values[values.length-1])}</strong></span>
-        <span>YoY：<span class="${yoys[yoys.length-1]>=0?'pos':'neg'}">${yoys[yoys.length-1]?.toFixed(1)}%</span></span>
+        <span>ææ°æçæ¶ï¼<strong style="color:#c9d1d9">${fmtM(latest)}</strong></span>
+        <span>YoYï¼<span class="${(latestYoy||0) >= 0 ? 'pos' : 'neg'}">${(latestYoy||0).toFixed(1)}%</span></span>
       </div>`;
 
     destroyChart(revenueChart);
@@ -194,18 +526,15 @@ async function loadRevenue(stockId) {
       data: {
         labels,
         datasets: [{
-          label: '月營收',
+          label: 'æçæ¶',
           data: values,
           backgroundColor: values.map((_, i) => i === values.length - 1 ? 'rgba(88,166,255,.9)' : 'rgba(88,166,255,.45)'),
-          borderRadius: 4,
-          borderSkipped: false,
+          borderRadius: 4, borderSkipped: false,
         }]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: {
-          callbacks: { label: ctx => ` ${fmtM(ctx.raw)}` }
-        }},
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${fmtM(ctx.raw)}` } } },
         scales: {
           x: { grid: { display: false } },
           y: { grid: { color: '#21262d' }, ticks: { callback: v => fmtM(v) } }
@@ -213,39 +542,37 @@ async function loadRevenue(stockId) {
       }
     });
   } catch (e) {
-    document.getElementById('revenueArea').innerHTML = `<div class="loading">載入失敗：${e.message}</div>`;
+    document.getElementById('revenueArea').innerHTML = `<div class="loading">è¼å¥å¤±æï¼${e.message}</div>`;
   }
 }
 
-// ─── Institutional ────────────────────────────────────────
+// âââ Institutional ââââââââââââââââââââââââââââââââââââââââ
 async function loadInstitutional(stockId) {
-  document.getElementById('instArea').innerHTML = `<div class="loading"><div class="spinner"></div> 載入三大法人…</div>`;
+  document.getElementById('instArea').innerHTML = `<div class="loading"><div class="spinner"></div> è¼å¥ä¸å¤§æ³äººâ¦</div>`;
   try {
     const d = await fetch(`/api/institutional/${stockId}`).then(r => r.json());
     if (!d.data || d.data.length === 0) {
-      document.getElementById('instArea').innerHTML = `<div class="loading">查無資料</div>`; return;
+      document.getElementById('instArea').innerHTML = `<div class="loading">æ¥ç¡è³æ</div>`; return;
     }
-    const labels = d.data.map(r => r.date.slice(5));
+    const labels  = d.data.map(r => r.date.slice(5));
     const foreign = d.data.map(r => r.foreign);
     const invest  = d.data.map(r => r.investment);
     const dealer  = d.data.map(r => r.dealer);
-
-    // Summary
-    const sumF = foreign.reduce((a,b)=>a+b,0);
-    const sumI = invest.reduce((a,b)=>a+b,0);
-    const sumD = dealer.reduce((a,b)=>a+b,0);
+    const sumF = foreign.reduce((a, b) => a + b, 0);
+    const sumI = invest.reduce((a, b) => a + b, 0);
+    const sumD = dealer.reduce((a, b) => a + b, 0);
 
     document.getElementById('instArea').innerHTML = `
       <div class="inst-legend">
-        <span><span class="dot" style="background:#58a6ff"></span>外資</span>
-        <span><span class="dot" style="background:#3fb950"></span>投信</span>
-        <span><span class="dot" style="background:#d29922"></span>自營商</span>
+        <span><span class="dot" style="background:#58a6ff"></span>å¤è³</span>
+        <span><span class="dot" style="background:#3fb950"></span>æä¿¡</span>
+        <span><span class="dot" style="background:#d29922"></span>èªçå</span>
       </div>
       <div class="chart-wrap"><canvas id="instChart"></canvas></div>
       <div class="d-flex justify-content-around mt-2 muted-text text-center">
-        <span>外資累計<br/><strong style="color:#58a6ff">${colorSign(sumF)}</strong></span>
-        <span>投信累計<br/><strong style="color:#3fb950">${colorSign(sumI)}</strong></span>
-        <span>自營商累計<br/><strong style="color:#d29922">${colorSign(sumD)}</strong></span>
+        <span>å¤è³ç´¯è¨<br/><strong style="color:#58a6ff">${colorSign(sumF)}</strong></span>
+        <span>æä¿¡ç´¯è¨<br/><strong style="color:#3fb950">${colorSign(sumI)}</strong></span>
+        <span>èªçåç´¯è¨<br/><strong style="color:#d29922">${colorSign(sumD)}</strong></span>
       </div>`;
 
     destroyChart(instChart);
@@ -255,16 +582,14 @@ async function loadInstitutional(stockId) {
       data: {
         labels,
         datasets: [
-          { label: '外資', data: foreign, backgroundColor: 'rgba(88,166,255,.7)', borderRadius: 2 },
-          { label: '投信', data: invest,  backgroundColor: 'rgba(63,185,80,.7)',  borderRadius: 2 },
-          { label: '自營商', data: dealer, backgroundColor: 'rgba(210,153,34,.7)', borderRadius: 2 },
+          { label: 'å¤è³', data: foreign, backgroundColor: 'rgba(88,166,255,.7)', borderRadius: 2 },
+          { label: 'æä¿¡', data: invest,  backgroundColor: 'rgba(63,185,80,.7)',  borderRadius: 2 },
+          { label: 'èªçå', data: dealer, backgroundColor: 'rgba(210,153,34,.7)', borderRadius: 2 },
         ]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: {
-          callbacks: { label: ctx => ` ${ctx.dataset.label}: ${fmtM(ctx.raw)}` }
-        }},
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${fmtM(ctx.raw)}` } } },
         scales: {
           x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 10 } },
           y: { stacked: true, grid: { color: '#21262d' }, ticks: { callback: v => fmtM(v) } }
@@ -272,20 +597,19 @@ async function loadInstitutional(stockId) {
       }
     });
   } catch (e) {
-    document.getElementById('instArea').innerHTML = `<div class="loading">載入失敗：${e.message}</div>`;
+    document.getElementById('instArea').innerHTML = `<div class="loading">è¼å¥å¤±æï¼${e.message}</div>`;
   }
 }
 
-// ─── Financial ────────────────────────────────────────────
+// âââ Financial ââââââââââââââââââââââââââââââââââââââââââââ
 async function loadFinancial(stockId) {
-  document.getElementById('finArea').innerHTML = `<div class="loading"><div class="spinner"></div> 載入財務報表…</div>`;
+  document.getElementById('finArea').innerHTML = `<div class="loading"><div class="spinner"></div> è¼å¥è²¡åå ±è¡¨â¦</div>`;
   try {
     const d = await fetch(`/api/financial/${stockId}`).then(r => r.json());
     if (!d.data || d.data.length === 0) {
-      document.getElementById('finArea').innerHTML = `<div class="loading">查無資料</div>`; return;
+      document.getElementById('finArea').innerHTML = `<div class="loading">æ¥ç¡è³æ</div>`; return;
     }
     const rows = [...d.data].reverse();
-
     const tableRows = rows.map(r => `
       <tr>
         <td>${r.period}</td>
@@ -293,7 +617,7 @@ async function loadFinancial(stockId) {
         <td>${fmtM(r.opIncome)}</td>
         <td>${fmtM(r.netIncome)}</td>
         <td class="${r.eps >= 0 ? 'pos' : 'neg'}">${r.eps.toFixed(2)}</td>
-        <td class="${r.revenue ? (r.opIncome/r.revenue*100).toFixed(1)>0?'pos':'neg' : ''}">${r.revenue ? (r.opIncome/r.revenue*100).toFixed(1)+'%' : '–'}</td>
+        <td class="${r.revenue ? (r.opIncome / r.revenue * 100 > 0 ? 'pos' : 'neg') : ''}">${r.revenue ? (r.opIncome / r.revenue * 100).toFixed(1) + '%' : 'â'}</td>
       </tr>
     `).join('');
 
@@ -302,22 +626,15 @@ async function loadFinancial(stockId) {
         <div class="col-lg-7">
           <div style="overflow-x:auto">
             <table class="table-fin">
-              <thead>
-                <tr>
-                  <th>季度</th>
-                  <th>營業收入</th>
-                  <th>營業利益</th>
-                  <th>本期淨利</th>
-                  <th>EPS</th>
-                  <th>營益率</th>
-                </tr>
-              </thead>
+              <thead><tr>
+                <th>å­£åº¦</th><th>çæ¥­æ¶å¥</th><th>çæ¥­å©ç</th><th>æ¬ææ·¨å©</th><th>EPS</th><th>ççç</th>
+              </tr></thead>
               <tbody>${tableRows}</tbody>
             </table>
           </div>
         </div>
         <div class="col-lg-5">
-          <div style="font-size:.75rem;color:var(--muted);margin-bottom:6px">EPS 趨勢（元）</div>
+          <div style="font-size:.75rem;color:var(--muted);margin-bottom:6px">EPS è¶¨å¢ï¼åï¼</div>
           <div class="chart-wrap" style="height:200px"><canvas id="epsChart"></canvas></div>
         </div>
       </div>`;
@@ -337,9 +654,7 @@ async function loadFinancial(stockId) {
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: {
-          callbacks: { label: ctx => ` EPS: ${ctx.raw.toFixed(2)} 元` }
-        }},
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` EPS: ${ctx.raw.toFixed(2)} å` } } },
         scales: {
           x: { grid: { display: false } },
           y: { grid: { color: '#21262d' } }
@@ -347,26 +662,35 @@ async function loadFinancial(stockId) {
       }
     });
   } catch (e) {
-    document.getElementById('finArea').innerHTML = `<div class="loading">載入失敗：${e.message}</div>`;
+    document.getElementById('finArea').innerHTML = `<div class="loading">è¼å¥å¤±æï¼${e.message}</div>`;
   }
 }
 
-// ─── Load All ─────────────────────────────────────────────
+// âââ Load All âââââââââââââââââââââââââââââââââââââââââââââ
 function loadAll() {
   const stockId = document.getElementById('stockInput').value.trim();
   if (!stockId) return;
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set('stock', stockId);
+  history.replaceState({}, '', url);
+
+  loadKline(stockId);
   loadRevenue(stockId);
   loadInstitutional(stockId);
   loadFinancial(stockId);
 }
 
-document.getElementById('stockInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') loadAll();
-});
+document.getElementById('stockInput').addEventListener('keydown', e => { if (e.key === 'Enter') loadAll(); });
 
-// Init
-loadMarket();
-loadAll();
+// Init â check URL params
+(function init() {
+  const params = new URLSearchParams(window.location.search);
+  const s = params.get('stock');
+  if (s) document.getElementById('stockInput').value = s;
+  loadMarket();
+  loadAll();
+})();
 </script>
 </body>
 </html>
