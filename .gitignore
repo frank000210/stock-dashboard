@@ -1,3 +1,6 @@
 node_modules/
 .env
+scraper/.env
+scraper/__pycache__/
+*.pyc
 *.log
