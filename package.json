@@ -1,6 +1,21 @@
 {
   "name": "stock-dashboard",
   "version": "1.0.0",
+  "description": "Stock Dashboard - Monthly Revenue, Institutional Trading, Financial Statements",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "express": "^4.19.2",
+    "mongodb": "^6.3.0",
+    "node-cache": "^5.1.2"
+  }
+}
+{
+  "name": "stock-dashboard",
+  "version": "1.0.0",
   "description": "台股儀錶板 - 月營收、三大法人買賣超、財務報表",
   "main": "server.js",
   "scripts": {
