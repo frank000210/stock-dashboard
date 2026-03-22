@@ -1,291 +1,342 @@
 """
-MOPS Scraper â Fetches monthly revenue & quarterly financial statements
-from mops.twse.com.tw and stores them in MongoDB.
+MOPS Scraper - Fetches monthly revenue & quarterly financial statements
+from mops.twse.com.tw (HTML endpoints) and stores them in MongoDB.
 
-Run locally (residential IP) since MOPS blocks cloud/datacenter IPs.
+Uses the traditional HTML scraping approach (not JSON API) which is more reliable.
 
 Usage:
-  pip install -r requirements.txt
-  cp .env.example .env   # fill in MONGODB_URI and STOCK_IDS
-  python mops_scraper.py          # one-time run
-  python mops_scraper.py --watch  # run every 6 hours
+    python mops_scraper.py             # one-time run
+    python mops_scraper.py --watch     # run on schedule
 """
 
 import os
 import re
 import sys
 import time
-import json
 import logging
 from datetime import datetime, timedelta
 
 import requests
+import pandas as pd
+from bs4 import BeautifulSoup
 from pymongo import MongoClient, UpdateOne
-from dotenv import load_dotenv
 
-load_dotenv()
-
-# ââ Config ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# --------------- config ---------------
 MONGODB_URI = os.getenv("MONGODB_URI", "")
 STOCK_IDS = [s.strip() for s in os.getenv("STOCK_IDS", "2330").split(",") if s.strip()]
+SCHEDULE_HOUR = int(os.getenv("SCHEDULE_HOUR", "17"))  # default 5PM Taiwan time
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-log = logging.getLogger("mops_scraper")
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8",
-    "Origin": "https://mops.twse.com.tw",
-    "Referer": "https://mops.twse.com.tw/mops/",
-    "Content-Type": "application/json",
-}
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger("mops")
 
 SESSION = requests.Session()
-SESSION.headers.update(HEADERS)
+SESSION.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+})
 
 
+# --------------- DB ---------------
 def connect_db():
-    """Connect to MongoDB and return the database handle."""
     if not MONGODB_URI:
-        log.error("MONGODB_URI not set. Copy .env.example to .env and fill it in.")
+        log.error("MONGODB_URI not set")
         sys.exit(1)
-    client = MongoClient(MONGODB_URI)
+    client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=10000)
     db = client["stock_dashboard"]
-    # Create indexes
-    db["revenue"].create_index([("stock_id", 1), ("period", 1)], unique=True)
-    db["financial"].create_index([("stock_id", 1), ("period", 1)], unique=True)
-    db["scrape_log"].create_index([("stock_id", 1), ("type", 1)])
+    db.command("ping")
     log.info("Connected to MongoDB")
     return db
 
 
-# ââ Revenue Scraper âââââââââââââââââââââââââââââââââââââââââââââââââ
-def to_num(s):
-    """Parse a number string like '317,656,613' to numeric value."""
-    if not s:
-        return 0
-    try:
-        cleaned = re.sub(r"[,\s%]", "", str(s).strip())
-        if not cleaned or cleaned == "-":
-            return 0
-        return float(cleaned)
-    except (ValueError, TypeError):
-        return 0
-def scrape_revenue(db, stock_id, months=15):
-    """Scrape monthly revenue for a stock from MOPS and upsert into MongoDB."""
-    log.info(f"[{stock_id}] Scraping monthly revenue (last {months} months)...")
+# --------------- Monthly Revenue ---------------
+def scrape_monthly_revenue(db, stock_ids, months=15):
+    log.info(f"Scraping monthly revenue for {len(stock_ids)} stocks (last {months} months)...")
     now = datetime.now()
     ops = []
+    stock_set = set(stock_ids)
 
     for i in range(months):
         d = datetime(now.year, now.month, 1) - timedelta(days=i * 30)
-        d = datetime(d.year, d.month, 1)  # normalize to 1st of month
+        d = datetime(d.year, d.month, 1)
         tw_year = d.year - 1911
-        month = f"{d.month:02d}"
+        month = d.month
 
-        try:
-            resp = SESSION.post(
-                "https://mops.twse.com.tw/mops/api/t05st10_ifrs",
-                json={
-                    "companyId": stock_id,
-                    "dataType": "2",
-                    "month": month,
-                    "year": str(tw_year),
-                    "subsidiaryCompanyId": "",
-                },
-                timeout=15,
-            )
-            data = resp.json()
-            log.info(f"[{stock_id}] {tw_year}/{month}: API code={data.get('code')}, keys={list(data.keys())}")
+        urls = [
+            f"https://mops.twse.com.tw/nas/t21/sii/t21sc03_{tw_year}_{month}_0.html",
+            f"https://mops.twse.com.tw/nas/t21/sii/t21sc03_{tw_year}_{month}_1.html",
+        ]
 
-            if data.get("code") != 200:
-                log.warning(f"[{stock_id}] {tw_year}/{month}: code={data.get('code')}, resp={str(data)[:300]}")
-                continue
+        for url in urls:
+            try:
+                resp = SESSION.get(url, timeout=15)
+                resp.encoding = "big5"
+                html_dfs = pd.read_html(resp.text)
+                valid_dfs = [df for df in html_dfs if df.shape[1] == 11]
+                if not valid_dfs:
+                    continue
 
-            result = data.get("result", {})
-            rows = result.get("data", [])
-            yymm = result.get("yymm", "")
-            log.info(f"[{stock_id}] {tw_year}/{month}: rows={len(rows)}, yymm={yymm}, row0={rows[0] if rows else 'empty'}")
+                df = pd.concat(valid_dfs)
+                df.columns = df.columns.get_level_values(1) if isinstance(df.columns, pd.MultiIndex) else df.columns
+                df = df[df.iloc[:, 1] != "合計"]
+                df = df.reset_index(drop=True)
+                col_names = list(df.columns)
+                stock_no_col = col_names[0]
 
-            month_row = next((r for r in rows if r[0] == "æ¬æ"), None)
-            cum_row = next((r for r in rows if r[0] == "ç´¯è¨"), None)
-            yoy_row = next((r for r in rows if r[0] and "å»å¹´åæ" in r[0]), None)
+                for _, row in df.iterrows():
+                    sid = str(row[stock_no_col]).strip()
+                    if sid not in stock_set:
+                        continue
 
-            if month_row and to_num(month_row[1]) > 0:
-                tw_y = yymm[: len(yymm) - 2]
-                tw_m = yymm[-2:]
-                period = f"{tw_y}/{tw_m}"
+                    try:
+                        revenue = parse_num(row.iloc[2])
+                        last_month_rev = parse_num(row.iloc[3])
+                        last_year_rev = parse_num(row.iloc[4])
+                        mom_pct = parse_num(row.iloc[5])
+                        yoy_pct = parse_num(row.iloc[6])
+                        cum_revenue = parse_num(row.iloc[7])
+                        last_year_cum = parse_num(row.iloc[8])
 
-                doc = {
-                    "stock_id": stock_id,
-                    "period": period,
-                    "revenue": to_num(month_row[1]) * 1000,
-                    "cum_revenue": to_num(cum_row[1]) * 1000 if cum_row else 0,
-                    "yoy": to_num(yoy_row[1]) if yoy_row and yoy_row[1] else 0,
-                    "tw_year": int(tw_y),
-                    "tw_month": int(tw_m),
-                    "updated_at": datetime.utcnow(),
-                }
-                ops.append(
-                    UpdateOne(
-                        {"stock_id": stock_id, "period": period},
-                        {"$set": doc},
-                        upsert=True,
-                    )
-                )
-                log.info(f"[{stock_id}] Revenue {period}: {doc['revenue']:,}")
+                        period = f"{tw_year}/{month:02d}"
+                        doc = {
+                            "stock_id": sid,
+                            "period": period,
+                            "revenue": revenue * 1000,
+                            "last_month_revenue": last_month_rev * 1000,
+                            "last_year_revenue": last_year_rev * 1000,
+                            "mom_pct": mom_pct,
+                            "yoy": yoy_pct,
+                            "cum_revenue": cum_revenue * 1000,
+                            "last_year_cum_revenue": last_year_cum * 1000,
+                            "tw_year": tw_year,
+                            "tw_month": month,
+                            "updated_at": datetime.utcnow(),
+                        }
+                        ops.append(UpdateOne(
+                            {"stock_id": sid, "period": period},
+                            {"$set": doc},
+                            upsert=True,
+                        ))
+                        log.info(f"[{sid}] Revenue {period}: {revenue * 1000:,.0f}")
+                    except Exception as e:
+                        log.debug(f"[{sid}] Row parse error: {e}")
 
-        except Exception as e:
-            log.warning(f"[{stock_id}] Revenue {tw_year}/{month} error: {e}")
+            except Exception as e:
+                log.debug(f"Revenue {tw_year}/{month} url={url} error: {e}")
 
-        time.sleep(0.3)  # polite delay
+            time.sleep(0.5)
 
     if ops:
         result = db["revenue"].bulk_write(ops)
-        log.info(f"[{stock_id}] Revenue: upserted={result.upserted_count}, modified={result.modified_count}")
+        log.info(f"Revenue: upserted={result.upserted_count}, modified={result.modified_count}")
     else:
-        log.warning(f"[{stock_id}] No revenue data scraped")
-
-    # Update scrape log
-    db["scrape_log"].update_one(
-        {"stock_id": stock_id, "type": "revenue"},
-        {"$set": {"last_run": datetime.utcnow(), "records": len(ops)}},
-        upsert=True,
-    )
+        log.warning("No revenue data scraped")
 
 
-# ââ Financial Statements Scraper ââââââââââââââââââââââââââââââââââââ
-def scrape_financial(db, stock_id, quarters=8):
-    """Scrape quarterly financial statements from MOPS and upsert into MongoDB."""
-    log.info(f"[{stock_id}] Scraping financial statements (last {quarters} quarters)...")
+# --------------- Quarterly Financial (EPS, NAV) ---------------
+def scrape_financial(db, stock_ids, quarters=8):
+    log.info(f"Scraping quarterly financial for {len(stock_ids)} stocks (last {quarters} quarters)...")
     now = datetime.now()
-    tw_year = now.year - 1911
+    tw_year_now = now.year - 1911
+    stock_set = set(stock_ids)
     ops = []
 
-    # Build list of (year, season) newest first
-    periods = []
-    for y in range(tw_year, tw_year - 4, -1):
-        for s in range(4, 0, -1):
-            periods.append((y, s))
+    quarter_list = []
+    current_q = (now.month - 1) // 3
+    if current_q == 0:
+        current_q = 4
+        start_year = tw_year_now - 1
+    else:
+        start_year = tw_year_now
 
-    found = 0
-    for year, season in periods:
-        if found >= quarters:
-            break
+    for i in range(quarters):
+        q = current_q - i
+        y = start_year
+        while q <= 0:
+            q += 4
+            y -= 1
+        quarter_list.append((y, q))
+
+    for tw_year, season in quarter_list:
+        try:
+            eps_data = _scrape_income_statement(tw_year, season, stock_set)
+            for sid, eps_val in eps_data.items():
+                q_map = {1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"}
+                period = f"{tw_year + 1911}{q_map[season]}"
+                ops.append(UpdateOne(
+                    {"stock_id": sid, "period": period},
+                    {"$set": {
+                        "stock_id": sid,
+                        "period": period,
+                        "eps": eps_val,
+                        "year": tw_year + 1911,
+                        "season": season,
+                        "updated_at": datetime.utcnow(),
+                    },
+                     "$setOnInsert": {
+                         "revenue": 0,
+                         "operating_income": 0,
+                         "net_income": 0,
+                     }},
+                    upsert=True,
+                ))
+                log.info(f"[{sid}] EPS {period}: {eps_val}")
+        except Exception as e:
+            log.warning(f"EPS {tw_year}/Q{season} error: {e}")
+
+        time.sleep(3)
 
         try:
-            resp = SESSION.post(
-                "https://mops.twse.com.tw/mops/api/t164sb04",
-                json={
-                    "companyId": stock_id,
-                    "dataType": "2",
-                    "year": str(year),
-                    "season": f"{season:02d}",
-                    "subsidiaryCompanyId": "",
-                },
-                timeout=20,
-            )
-            data = resp.json()
-            log.info(f"[{stock_id}] Q{season}/{year}: fin code={data.get('code')}, keys={list(data.keys())}")
-
-            if data.get("code") != 200:
-                continue
-
-            result = data.get("result", {})
-            report_list = result.get("reportList", [])
-            log.info(f"[{stock_id}] Q{season}/{year}: reportList len={len(report_list)}, result_keys={list(result.keys())}")
-            if not report_list:
-                continue
-
-            revenue = 0
-            op_income = 0
-            net_income = 0
-            eps = 0.0
-
-            for row in report_list:
-                label = (row[0] or "").strip()
-                val_str = re.sub(r"[,\s]", "", str(row[1])) if row[1] else "0"
-
-                if label == "çæ¥­æ¶å¥åè¨":
-                    revenue = to_num(val_str) * 1000
-                elif label == "çæ¥­å©çï¼æå¤±ï¼":
-                    op_income = to_num(val_str) * 1000
-                elif "æ¬ææ·¨å©" in label and "æ­¸" not in label:
-                    net_income = to_num(val_str) * 1000
-                elif label.replace(" ", "") == "åºæ¬æ¯è¡çé¤":
-                    try:
-                        eps = float(val_str)
-                    except ValueError:
-                        pass
-
-            # Fallback EPS search
-            if eps == 0:
-                for row in report_list:
-                    lbl = (row[0] or "").replace(" ", "").strip()
-                    if lbl == "åºæ¬æ¯è¡çé¤" and row[1]:
-                        try:
-                            eps = float(re.sub(r"[,\s]", "", str(row[1])))
-                            if eps != 0:
-                                break
-                        except ValueError:
-                            pass
-
-            q_map = {1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"}
-            period = f"{year + 1911}{q_map[season]}"
-
-            if revenue > 0 or eps != 0:
-                doc = {
-                    "stock_id": stock_id,
-                    "period": period,
-                    "revenue": revenue,
-                    "op_income": op_income,
-                    "net_income": net_income,
-                    "eps": eps,
-                    "tw_year": year,
-                    "season": season,
-                    "updated_at": datetime.utcnow(),
-                }
-                ops.append(
-                    UpdateOne(
-                        {"stock_id": stock_id, "period": period},
-                        {"$set": doc},
-                        upsert=True,
-                    )
-                )
-                found += 1
-                log.info(f"[{stock_id}] Financial {period}: rev={revenue:,} eps={eps}")
-
+            nav_data = _scrape_balance_sheet(tw_year, season, stock_set)
+            for sid, nav_val in nav_data.items():
+                q_map = {1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"}
+                period = f"{tw_year + 1911}{q_map[season]}"
+                ops.append(UpdateOne(
+                    {"stock_id": sid, "period": period},
+                    {"$set": {
+                        "nav_per_share": nav_val,
+                        "updated_at": datetime.utcnow(),
+                    }},
+                    upsert=True,
+                ))
+                log.info(f"[{sid}] NAV {period}: {nav_val}")
         except Exception as e:
-            log.warning(f"[{stock_id}] Financial {year}Q{season} error: {e}")
+            log.warning(f"NAV {tw_year}/Q{season} error: {e}")
 
-        time.sleep(0.5)  # polite delay
+        time.sleep(3)
 
     if ops:
         result = db["financial"].bulk_write(ops)
-        log.info(f"[{stock_id}] Financial: upserted={result.upserted_count}, modified={result.modified_count}")
+        log.info(f"Financial: upserted={result.upserted_count}, modified={result.modified_count}")
     else:
-        log.warning(f"[{stock_id}] No financial data scraped")
-
-    db["scrape_log"].update_one(
-        {"stock_id": stock_id, "type": "financial"},
-        {"$set": {"last_run": datetime.utcnow(), "records": len(ops)}},
-        upsert=True,
-    )
+        log.warning("No financial data scraped")
 
 
-# ââ Main ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+def _scrape_income_statement(tw_year, season, stock_set):
+    url = "https://mops.twse.com.tw/mops/web/ajax_t163sb04"
+    form_data = {
+        "encodeURIComponent": 1,
+        "isQuery": "Y",
+        "step": 1,
+        "TYPEK": "sii",
+        "year": tw_year,
+        "firstin": 1,
+        "off": 1,
+        "season": season,
+    }
+
+    resp = SESSION.post(url, data=form_data, timeout=30)
+    resp.encoding = "utf8"
+    soup = BeautifulSoup(resp.text, "html.parser")
+    tables = soup.find_all("table", {"class": "hasBorder"})
+
+    results = {}
+    data = _parse_html_tables(tables)
+
+    header_row = None
+    eps_col_idx = -1
+
+    for row_data in data:
+        if row_data and row_data[0] == "公司代號":
+            header_row = row_data
+            for j, col_name in enumerate(header_row):
+                if "基本每股盈餘" in col_name:
+                    eps_col_idx = j
+                    break
+            continue
+
+        if header_row and eps_col_idx > 0 and row_data:
+            sid = str(row_data[0]).strip()
+            if sid in stock_set and len(row_data) > eps_col_idx:
+                eps_str = row_data[eps_col_idx]
+                eps_val = parse_num(eps_str)
+                if eps_val != 0 or eps_str.strip() == "0" or eps_str.strip() == "0.00":
+                    results[sid] = eps_val
+
+    log.info(f"Income statement {tw_year}/Q{season}: found {len(results)} stocks")
+    return results
+
+
+def _scrape_balance_sheet(tw_year, season, stock_set):
+    url = "https://mops.twse.com.tw/mops/web/ajax_t163sb05"
+    form_data = {
+        "encodeURIComponent": 1,
+        "isQuery": "Y",
+        "step": 1,
+        "TYPEK": "sii",
+        "year": tw_year,
+        "firstin": 1,
+        "off": 1,
+        "season": season,
+    }
+
+    resp = SESSION.post(url, data=form_data, timeout=30)
+    resp.encoding = "utf8"
+    soup = BeautifulSoup(resp.text, "html.parser")
+    tables = soup.find_all("table", {"class": "hasBorder"})
+
+    results = {}
+    data = _parse_html_tables(tables)
+
+    header_row = None
+    nav_col_idx = -1
+
+    for row_data in data:
+        if row_data and row_data[0] == "公司代號":
+            header_row = row_data
+            for j, col_name in enumerate(header_row):
+                if "每股參考淨值" in col_name:
+                    nav_col_idx = j
+                    break
+            continue
+
+        if header_row and nav_col_idx > 0 and row_data:
+            sid = str(row_data[0]).strip()
+            if sid in stock_set and len(row_data) > nav_col_idx:
+                nav_str = row_data[nav_col_idx]
+                nav_val = parse_num(nav_str)
+                if nav_val != 0:
+                    results[sid] = nav_val
+
+    log.info(f"Balance sheet {tw_year}/Q{season}: found {len(results)} stocks")
+    return results
+
+
+def _parse_html_tables(tables):
+    data = []
+    for tb in tables:
+        for row in tb.find_all("tr"):
+            tempdata = []
+            for col in row.find_all("th"):
+                tempdata.append(col.text.strip().replace("　", ""))
+            for col in row.find_all("td"):
+                tempdata.append(col.text.strip().replace("　", ""))
+            if len(tempdata) > 1:
+                data.append(tempdata)
+    return data
+
+
+# --------------- Utilities ---------------
+def parse_num(s):
+    if s is None or (isinstance(s, float) and pd.isna(s)):
+        return 0.0
+    try:
+        cleaned = re.sub(r"[,\s%]", "", str(s).strip())
+        if not cleaned or cleaned in ("-", "不適用", "N/A", "--"):
+            return 0.0
+        return float(cleaned)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+# --------------- Orchestration ---------------
 def run_all(db):
-    """Run all scrapers for all configured stock IDs."""
     log.info(f"Starting scrape for stocks: {STOCK_IDS}")
-    for stock_id in STOCK_IDS:
-        scrape_revenue(db, stock_id)
-        scrape_financial(db, stock_id)
-        time.sleep(1)
+    scrape_monthly_revenue(db, STOCK_IDS, months=15)
+    scrape_financial(db, STOCK_IDS, quarters=8)
+    db["scrape_log"].insert_one({
+        "timestamp": datetime.utcnow(),
+        "stocks": STOCK_IDS,
+        "status": "completed",
+    })
     log.info("Scrape complete!")
 
 
@@ -295,314 +346,12 @@ def main():
     if "--watch" in sys.argv:
         import schedule as sched
 
-        log.info("Watch mode: running every 6 hours")
-        run_all(db)
-        sched.every(6).hours.do(run_all, db)
-        while True:
-            sched.run_pending()
-            time.sleep(60)
-    else:
+        log.info(f"Watch mode: running now, then daily at {SCHEDULE_HOUR}:00 Taiwan time")
         run_all(db)
 
+        utc_hour = (SCHEDULE_HOUR - 8) % 24
+        sched.every().day.at(f"{utc_hour:02d}:00").do(run_all, db)
 
-if __name__ == "__main__":
-    main()
-"""
-MOPS Scraper â Fetches monthly revenue & quarterly financial statements
-from mops.twse.com.tw and stores them in MongoDB.
-
-Run locally (residential IP) since MOPS blocks cloud/datacenter IPs.
-
-Usage:
-  pip install -r requirements.txt
-  cp .env.example .env   # fill in MONGODB_URI and STOCK_IDS
-  python mops_scraper.py          # one-time run
-  python mops_scraper.py --watch  # run every 6 hours
-"""
-
-import os
-import re
-import sys
-import time
-import json
-import logging
-from datetime import datetime, timedelta
-
-import requests
-from pymongo import MongoClient, UpdateOne
-from dotenv import load_dotenv
-
-load_dotenv()
-
-# ââ Config ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-MONGODB_URI = os.getenv("MONGODB_URI", "")
-STOCK_IDS = [s.strip() for s in os.getenv("STOCK_IDS", "2330").split(",") if s.strip()]
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-log = logging.getLogger("mops_scraper")
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8",
-    "Origin": "https://mops.twse.com.tw",
-    "Referer": "https://mops.twse.com.tw/mops/",
-    "Content-Type": "application/json",
-}
-
-SESSION = requests.Session()
-SESSION.headers.update(HEADERS)
-
-
-def connect_db():
-    """Connect to MongoDB and return the database handle."""
-    if not MONGODB_URI:
-        log.error("MONGODB_URI not set. Copy .env.example to .env and fill it in.")
-        sys.exit(1)
-    client = MongoClient(MONGODB_URI)
-    db = client["stock_dashboard"]
-    # Create indexes
-    db["revenue"].create_index([("stock_id", 1), ("period", 1)], unique=True)
-    db["financial"].create_index([("stock_id", 1), ("period", 1)], unique=True)
-    db["scrape_log"].create_index([("stock_id", 1), ("type", 1)])
-    log.info("Connected to MongoDB")
-    return db
-
-
-# ââ Revenue Scraper âââââââââââââââââââââââââââââââââââââââââââââââââ
-def to_num(s):
-    """Parse a number string like '317,656,613' to numeric value."""
-    if not s:
-        return 0
-    try:
-        cleaned = re.sub(r"[,\s%]", "", str(s).strip())
-        if not cleaned or cleaned == "-":
-            return 0
-        return float(cleaned)
-    except (ValueError, TypeError):
-        return 0
-def scrape_revenue(db, stock_id, months=15):
-    """Scrape monthly revenue for a stock from MOPS and upsert into MongoDB."""
-    log.info(f"[{stock_id}] Scraping monthly revenue (last {months} months)...")
-    now = datetime.now()
-    ops = []
-
-    for i in range(months):
-        d = datetime(now.year, now.month, 1) - timedelta(days=i * 30)
-        d = datetime(d.year, d.month, 1)  # normalize to 1st of month
-        tw_year = d.year - 1911
-        month = f"{d.month:02d}"
-
-        try:
-            resp = SESSION.post(
-                "https://mops.twse.com.tw/mops/api/t05st10_ifrs",
-                json={
-                    "companyId": stock_id,
-                    "dataType": "2",
-                    "month": month,
-                    "year": str(tw_year),
-                    "subsidiaryCompanyId": "",
-                },
-                timeout=15,
-            )
-            data = resp.json()
-
-            if data.get("code") != 200:
-                log.debug(f"[{stock_id}] {tw_year}/{month}: code={data.get('code')}")
-                continue
-
-            result = data.get("result", {})
-            rows = result.get("data", [])
-            yymm = result.get("yymm", "")
-
-            month_row = next((r for r in rows if r[0] == "æ¬æ"), None)
-            cum_row = next((r for r in rows if r[0] == "ç´¯è¨"), None)
-            yoy_row = next((r for r in rows if r[0] and "å»å¹´åæ" in r[0]), None)
-
-            if month_row and to_num(month_row[1]) > 0:
-                tw_y = yymm[: len(yymm) - 2]
-                tw_m = yymm[-2:]
-                period = f"{tw_y}/{tw_m}"
-
-                doc = {
-                    "stock_id": stock_id,
-                    "period": period,
-                    "revenue": to_num(month_row[1]) * 1000,
-                    "cum_revenue": to_num(cum_row[1]) * 1000 if cum_row else 0,
-                    "yoy": to_num(yoy_row[1]) if yoy_row and yoy_row[1] else 0,
-                    "tw_year": int(tw_y),
-                    "tw_month": int(tw_m),
-                    "updated_at": datetime.utcnow(),
-                }
-                ops.append(
-                    UpdateOne(
-                        {"stock_id": stock_id, "period": period},
-                        {"$set": doc},
-                        upsert=True,
-                    )
-                )
-                log.info(f"[{stock_id}] Revenue {period}: {doc['revenue']:,}")
-
-        except Exception as e:
-            log.warning(f"[{stock_id}] Revenue {tw_year}/{month} error: {e}")
-
-        time.sleep(0.3)  # polite delay
-
-    if ops:
-        result = db["revenue"].bulk_write(ops)
-        log.info(f"[{stock_id}] Revenue: upserted={result.upserted_count}, modified={result.modified_count}")
-    else:
-        log.warning(f"[{stock_id}] No revenue data scraped")
-
-    # Update scrape log
-    db["scrape_log"].update_one(
-        {"stock_id": stock_id, "type": "revenue"},
-        {"$set": {"last_run": datetime.utcnow(), "records": len(ops)}},
-        upsert=True,
-    )
-
-
-# ââ Financial Statements Scraper ââââââââââââââââââââââââââââââââââââ
-def scrape_financial(db, stock_id, quarters=8):
-    """Scrape quarterly financial statements from MOPS and upsert into MongoDB."""
-    log.info(f"[{stock_id}] Scraping financial statements (last {quarters} quarters)...")
-    now = datetime.now()
-    tw_year = now.year - 1911
-    ops = []
-
-    # Build list of (year, season) newest first
-    periods = []
-    for y in range(tw_year, tw_year - 4, -1):
-        for s in range(4, 0, -1):
-            periods.append((y, s))
-
-    found = 0
-    for year, season in periods:
-        if found >= quarters:
-            break
-
-        try:
-            resp = SESSION.post(
-                "https://mops.twse.com.tw/mops/api/t164sb04",
-                json={
-                    "companyId": stock_id,
-                    "dataType": "2",
-                    "year": str(year),
-                    "season": f"{season:02d}",
-                    "subsidiaryCompanyId": "",
-                },
-                timeout=20,
-            )
-            data = resp.json()
-
-            if data.get("code") != 200:
-                continue
-
-            result = data.get("result", {})
-            report_list = result.get("reportList", [])
-            if not report_list:
-                continue
-
-            revenue = 0
-            op_income = 0
-            net_income = 0
-            eps = 0.0
-
-            for row in report_list:
-                label = (row[0] or "").strip()
-                val_str = re.sub(r"[,\s]", "", str(row[1])) if row[1] else "0"
-
-                if label == "çæ¥­æ¶å¥åè¨":
-                    revenue = to_num(val_str) * 1000
-                elif label == "çæ¥­å©çï¼æå¤±ï¼":
-                    op_income = to_num(val_str) * 1000
-                elif "æ¬ææ·¨å©" in label and "æ­¸" not in label:
-                    net_income = to_num(val_str) * 1000
-                elif label.replace(" ", "") == "åºæ¬æ¯è¡çé¤":
-                    try:
-                        eps = float(val_str)
-                    except ValueError:
-                        pass
-
-            # Fallback EPS search
-            if eps == 0:
-                for row in report_list:
-                    lbl = (row[0] or "").replace(" ", "").strip()
-                    if lbl == "åºæ¬æ¯è¡çé¤" and row[1]:
-                        try:
-                            eps = float(re.sub(r"[,\s]", "", str(row[1])))
-                            if eps != 0:
-                                break
-                        except ValueError:
-                            pass
-
-            q_map = {1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"}
-            period = f"{year + 1911}{q_map[season]}"
-
-            if revenue > 0 or eps != 0:
-                doc = {
-                    "stock_id": stock_id,
-                    "period": period,
-                    "revenue": revenue,
-                    "op_income": op_income,
-                    "net_income": net_income,
-                    "eps": eps,
-                    "tw_year": year,
-                    "season": season,
-                    "updated_at": datetime.utcnow(),
-                }
-                ops.append(
-                    UpdateOne(
-                        {"stock_id": stock_id, "period": period},
-                        {"$set": doc},
-                        upsert=True,
-                    )
-                )
-                found += 1
-                log.info(f"[{stock_id}] Financial {period}: rev={revenue:,} eps={eps}")
-
-        except Exception as e:
-            log.warning(f"[{stock_id}] Financial {year}Q{season} error: {e}")
-
-        time.sleep(0.5)  # polite delay
-
-    if ops:
-        result = db["financial"].bulk_write(ops)
-        log.info(f"[{stock_id}] Financial: upserted={result.upserted_count}, modified={result.modified_count}")
-    else:
-        log.warning(f"[{stock_id}] No financial data scraped")
-
-    db["scrape_log"].update_one(
-        {"stock_id": stock_id, "type": "financial"},
-        {"$set": {"last_run": datetime.utcnow(), "records": len(ops)}},
-        upsert=True,
-    )
-
-
-# ââ Main ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-def run_all(db):
-    """Run all scrapers for all configured stock IDs."""
-    log.info(f"Starting scrape for stocks: {STOCK_IDS}")
-    for stock_id in STOCK_IDS:
-        scrape_revenue(db, stock_id)
-        scrape_financial(db, stock_id)
-        time.sleep(1)
-    log.info("Scrape complete!")
-
-
-def main():
-    db = connect_db()
-
-    if "--watch" in sys.argv:
-        import schedule as sched
-
-        log.info("Watch mode: running every 6 hours")
-        run_all(db)
-        sched.every(6).hours.do(run_all, db)
         while True:
             sched.run_pending()
             time.sleep(60)
