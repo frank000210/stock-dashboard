@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>å°è¡åé¶æ¿</title>
+  <title>TW Stock Dashboard</title>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -70,11 +70,11 @@
 
 <!-- Navbar -->
 <nav class="navbar navbar-expand-lg px-4 py-2">
-  <span class="navbar-brand">ð å°è¡åé¶æ¿</span>
+  <span class="navbar-brand">📈 TW Stock Dashboard</span>
   <div class="d-flex align-items-center gap-3 ms-auto">
-    <a href="/watchlist.html" class="nav-link-wl">â­ èªé¸è¡</a>
-    <input id="stockInput" class="search-box" type="text" placeholder="è¼¸å¥è¡ç¥¨ä»£è (ä¾: 2330)" value="2330" />
-    <button class="btn-search" onclick="loadAll()">æ¥è©¢</button>
+    <a href="/watchlist.html" class="nav-link-wl">⭐ Watchlist</a>
+    <input id="stockInput" class="search-box" type="text" placeholder="Enter stock code (e.g. 2330)" value="2330" />
+    <button class="btn-search" onclick="loadAll()">Search</button>
   </div>
 </nav>
 
@@ -82,27 +82,27 @@
 
   <!-- Market Overview -->
   <div id="marketSection" class="row g-3 mb-4">
-    <div class="col-12"><div class="muted-text">è¼å¥å¤§ç¤è³è¨ä¸­â¦</div></div>
+    <div class="col-12"><div class="muted-text">Loading market data...</div></div>
   </div>
 
   <!-- K-Line Chart -->
   <div class="card p-3 mb-4">
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-      <div class="section-title mb-0" style="margin-bottom:0!important">è¡å¹Kç·å</div>
+      <div class="section-title mb-0" style="margin-bottom:0!important">K-Line Chart</div>
       <div class="ind-toggles" id="klineToggles">
         <button class="btn-ind active" data-key="ma5">MA5</button>
         <button class="btn-ind active" data-key="ma10">MA10</button>
         <button class="btn-ind active" data-key="ma20">MA20</button>
         <button class="btn-ind" data-key="ma60">MA60</button>
-        <button class="btn-ind" data-key="bb">å¸æ</button>
-        <button class="btn-ind active" data-key="vol">æäº¤é</button>
+        <button class="btn-ind" data-key="bb">BB</button>
+        <button class="btn-ind active" data-key="vol">Volume</button>
         <button class="btn-ind active" data-key="macd">MACD</button>
         <button class="btn-ind active" data-key="kd">KD</button>
         <button class="btn-ind" data-key="rsi">RSI</button>
       </div>
     </div>
     <div id="klineArea">
-      <div class="loading"><div class="spinner"></div> è¼å¥Kç·â¦</div>
+      <div class="loading"><div class="spinner"></div> Loading K-Line...</div>
     </div>
   </div>
 
@@ -110,17 +110,17 @@
   <div class="row g-4 mb-4">
     <div class="col-xl-6">
       <div class="card p-4 h-100">
-        <div class="section-title">æçæ¶è¶¨å¢</div>
+        <div class="section-title">Monthly Revenue</div>
         <div id="revenueArea">
-          <div class="loading"><div class="spinner"></div> è¼å¥ä¸­â¦</div>
+          <div class="loading"><div class="spinner"></div> Loading...</div>
         </div>
       </div>
     </div>
     <div class="col-xl-6">
       <div class="card p-4 h-100">
-        <div class="section-title">ä¸å¤§æ³äººè²·è³£è¶ï¼è¿30äº¤ææ¥ï¼</div>
+        <div class="section-title">Institutional Trading (Last 30 Days)</div>
         <div id="instArea">
-          <div class="loading"><div class="spinner"></div> è¼å¥ä¸­â¦</div>
+          <div class="loading"><div class="spinner"></div> Loading...</div>
         </div>
       </div>
     </div>
@@ -130,9 +130,9 @@
   <div class="row g-4">
     <div class="col-12">
       <div class="card p-4">
-        <div class="section-title">è²¡åå ±è¡¨ï¼è¿8å­£ï¼</div>
+        <div class="section-title">Financial Statements (Last 8 Quarters)</div>
         <div id="finArea">
-          <div class="loading"><div class="spinner"></div> è¼å¥ä¸­â¦</div>
+          <div class="loading"><div class="spinner"></div> Loading...</div>
         </div>
       </div>
     </div>
@@ -141,7 +141,7 @@
 </div>
 
 <script>
-// âââ Chart defaults âââââââââââââââââââââââââââââââââââââââ
+// ─── Chart defaults ───────────────────────────────────────
 Chart.defaults.color = '#8b949e';
 Chart.defaults.borderColor = '#30363d';
 Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
@@ -157,21 +157,21 @@ const activeIndicators = {
 function destroyChart(chart) { if (chart) chart.destroy(); }
 
 function fmt(n) {
-  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(1) + 'å';
-  if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(0) + 'è¬';
+  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(1) + 'B';
+  if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(0) + '0K';
   return n.toLocaleString();
 }
 function fmtM(n) {
-  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(2) + 'å';
-  return (n / 1e4).toFixed(0) + 'è¬';
+  if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(2) + 'B';
+  return (n / 1e4).toFixed(0) + '0K';
 }
 function colorSign(n) {
-  return n > 0 ? '<span class="pos">â²' + fmtM(n) + '</span>'
-               : n < 0 ? '<span class="neg">â¼' + fmtM(Math.abs(n)) + '</span>'
-               : 'â';
+  return n > 0 ? '<span class="pos">▲' + fmtM(n) + '</span>'
+               : n < 0 ? '<span class="neg">▼' + fmtM(Math.abs(n)) + '</span>'
+               : '–';
 }
 
-// âââ Indicator math âââââââââââââââââââââââââââââââââââââââ
+// ─── Indicator math ───────────────────────────────────────
 function calcMA(data, period) {
   return data.map((_, i) => {
     if (i < period - 1) return null;
@@ -271,7 +271,7 @@ function calcBB(closes, period = 20, mult = 2) {
   return { upper, middle, lower };
 }
 
-// âââ K-Line Chart âââââââââââââââââââââââââââââââââââââââââ
+// ─── K-Line Chart ─────────────────────────────────────────
 function getSubPanels() {
   const panels = [];
   if (activeIndicators.vol)  panels.push('vol');
@@ -330,7 +330,7 @@ function buildKlineOption(data) {
     splitLine: { show: false }, axisTick: { show: false },
   }));
 
-  const subNames = { vol: 'é', macd: 'MACD', kd: 'KD', rsi: 'RSI' };
+  const subNames = { vol: 'Vol', macd: 'MACD', kd: 'KD', rsi: 'RSI' };
   const yAxes = grids.map((_, i) => ({
     type: 'value', gridIndex: i, scale: i === 0,
     name: i === 0 ? '' : subNames[subPanels[i - 1]],
@@ -338,7 +338,7 @@ function buildKlineOption(data) {
     min: (i > 0 && subPanels[i - 1] === 'rsi') ? 0 : undefined,
     max: (i > 0 && subPanels[i - 1] === 'rsi') ? 100 : undefined,
     axisLabel: { fontSize: 10, color: '#8b949e', formatter: v => {
-      if (i > 0 && subPanels[i - 1] === 'vol') return Math.abs(v) >= 1e8 ? (v/1e8).toFixed(0)+'å' : (v/1e4).toFixed(0)+'è¬';
+      if (i > 0 && subPanels[i - 1] === 'vol') return Math.abs(v) >= 1e8 ? (v/1e8).toFixed(0)+'B' : (v/1e4).toFixed(0)+'0K';
       return v;
     }},
     splitLine: { lineStyle: { color: '#21262d' } },
@@ -349,7 +349,7 @@ function buildKlineOption(data) {
 
   // Candlestick: [open, close, low, high]
   series.push({
-    type: 'candlestick', name: 'Kç·', xAxisIndex: 0, yAxisIndex: 0,
+    type: 'candlestick', name: 'Candlestick', xAxisIndex: 0, yAxisIndex: 0,
     data: closes.map((_, i) => [opens[i], closes[i], lows[i], highs[i]]),
     itemStyle: { color: '#f85149', color0: '#3fb950', borderColor: '#f85149', borderColor0: '#3fb950' },
   });
@@ -368,9 +368,9 @@ function buildKlineOption(data) {
   // Bollinger Bands
   if (activeIndicators.bb) {
     const bbStyle = { showSymbol: false, xAxisIndex: 0, yAxisIndex: 0 };
-    series.push({ type: 'line', name: 'BBä¸', data: bb.upper, lineStyle: { color: '#c9a227', width: 1, type: 'dashed' }, ...bbStyle });
-    series.push({ type: 'line', name: 'BBä¸­', data: bb.middle, lineStyle: { color: '#888', width: 1 }, ...bbStyle });
-    series.push({ type: 'line', name: 'BBä¸', data: bb.lower, lineStyle: { color: '#c9a227', width: 1, type: 'dashed' }, ...bbStyle });
+    series.push({ type: 'line', name: 'BB+', data: bb.upper, lineStyle: { color: '#c9a227', width: 1, type: 'dashed' }, ...bbStyle });
+    series.push({ type: 'line', name: 'BBm', data: bb.middle, lineStyle: { color: '#888', width: 1 }, ...bbStyle });
+    series.push({ type: 'line', name: 'BB-', data: bb.lower, lineStyle: { color: '#c9a227', width: 1, type: 'dashed' }, ...bbStyle });
   }
 
   // Sub-panels
@@ -378,12 +378,12 @@ function buildKlineOption(data) {
     const gi = pi + 1;
     if (panel === 'vol') {
       series.push({
-        type: 'bar', name: 'æäº¤é', xAxisIndex: gi, yAxisIndex: gi, barMaxWidth: 8,
+        type: 'bar', name: 'Volume', xAxisIndex: gi, yAxisIndex: gi, barMaxWidth: 8,
         data: vols.map((v, i) => ({ value: v, itemStyle: { color: closes[i] >= opens[i] ? 'rgba(248,81,73,.65)' : 'rgba(63,185,80,.65)' } })),
       });
     } else if (panel === 'macd') {
       series.push(
-        { type: 'bar', name: 'MACDæ±', xAxisIndex: gi, yAxisIndex: gi, barMaxWidth: 8,
+        { type: 'bar', name: 'MACD Hist', xAxisIndex: gi, yAxisIndex: gi, barMaxWidth: 8,
           data: macdRes.hist.map(v => ({ value: v, itemStyle: { color: (v||0) >= 0 ? '#f85149' : '#3fb950' } })) },
         { type: 'line', name: 'DIF', xAxisIndex: gi, yAxisIndex: gi, data: macdRes.macd, lineStyle: { color: '#58a6ff', width: 1.2 }, showSymbol: false },
         { type: 'line', name: 'DEA', xAxisIndex: gi, yAxisIndex: gi, data: macdRes.signal, lineStyle: { color: '#ff9800', width: 1.2 }, showSymbol: false }
@@ -399,7 +399,7 @@ function buildKlineOption(data) {
         lineStyle: { color: '#9f7be1', width: 1.5 }, showSymbol: false,
         markLine: {
           silent: true,
-          data: [{ yAxis: 70, name: 'è¶è²·' }, { yAxis: 30, name: 'è¶è³£' }],
+          data: [{ yAxis: 70, name: 'OB' }, { yAxis: 30, name: 'OS' }],
           lineStyle: { color: '#555', type: 'dashed', width: 1 },
           label: { fontSize: 10, color: '#555' },
         },
@@ -429,7 +429,7 @@ function buildKlineOption(data) {
       textStyle: { color: '#c9d1d9', fontSize: 11 },
     },
     legend: {
-      data: ['MA5','MA10','MA20','MA60','BBä¸','BBä¸­','BBä¸','DIF','DEA','K','D','RSI'],
+      data: ['MA5','MA10','MA20','MA60','BB+','BBm','BB-','DIF','DEA','K','D','RSI'],
       textStyle: { color: '#8b949e', fontSize: 10 }, top: 4, right: 14, itemWidth: 16,
     },
     series,
@@ -437,11 +437,11 @@ function buildKlineOption(data) {
 }
 
 async function loadKline(stockId) {
-  document.getElementById('klineArea').innerHTML = `<div class="loading"><div class="spinner"></div> è¼å¥Kç·è³æâ¦</div>`;
+  document.getElementById('klineArea').innerHTML = `<div class="loading"><div class="spinner"></div> Loading K-Line data...</div>`;
   try {
     const d = await fetch(`/api/kline/${stockId}`).then(r => r.json());
     if (!d.data || d.data.length < 10) {
-      document.getElementById('klineArea').innerHTML = `<div class="loading">æ¥ç¡Kç·è³æ</div>`; return;
+      document.getElementById('klineArea').innerHTML = `<div class="loading">No K-Line data found</div>`; return;
     }
     klineRawData = d.data;
     document.getElementById('klineArea').innerHTML = `<div id="klineChart" style="width:100%;height:580px;"></div>`;
@@ -450,11 +450,11 @@ async function loadKline(stockId) {
     klineChart = echarts.init(document.getElementById('klineChart'), null, { renderer: 'canvas' });
     klineChart.setOption(buildKlineOption(klineRawData));
   } catch (e) {
-    document.getElementById('klineArea').innerHTML = `<div class="loading">è¼å¥å¤±æï¼${e.message}</div>`;
+    document.getElementById('klineArea').innerHTML = `<div class="loading">Load failed: ${e.message}</div>`;
   }
 }
 
-// âââ Indicator toggles ââââââââââââââââââââââââââââââââââââ
+// ─── Indicator toggles ────────────────────────────────────
 document.querySelectorAll('[data-key]').forEach(btn => {
   btn.addEventListener('click', () => {
     const key = btn.dataset.key;
@@ -469,19 +469,19 @@ document.querySelectorAll('[data-key]').forEach(btn => {
 
 window.addEventListener('resize', () => { if (klineChart) klineChart.resize(); });
 
-// âââ Market Overview ââââââââââââââââââââââââââââââââââââââ
+// ─── Market Overview ──────────────────────────────────────
 async function loadMarket() {
   try {
     const d = await fetch('/api/market').then(r => r.json());
     const total = d.foreign + d.investment + d.dealer;
     const cards = [
-      { label: 'å¤è³è²·è³£è¶', val: d.foreign },
-      { label: 'æä¿¡è²·è³£è¶', val: d.investment },
-      { label: 'èªçåè²·è³£è¶', val: d.dealer },
-      { label: 'ä¸å¤§æ³äººåè¨', val: total, bold: true },
+      { label: 'Foreign Investors', val: d.foreign },
+      { label: 'Investment Trust', val: d.investment },
+      { label: 'Dealers', val: d.dealer },
+      { label: 'Total Institutional', val: total, bold: true },
     ];
     document.getElementById('marketSection').innerHTML = `
-      <div class="col-12"><div class="muted-text mb-2">å¤§ç¤ä¸å¤§æ³äººï½æ¥æï¼${d.date || 'â'}</div></div>
+      <div class="col-12"><div class="muted-text mb-2">Market Institutional | Date: ${d.date || '–'}</div></div>
       ${cards.map(c => `
         <div class="col-6 col-md-3">
           <div class="card p-3">
@@ -492,17 +492,17 @@ async function loadMarket() {
       `).join('')}
     `;
   } catch (e) {
-    document.getElementById('marketSection').innerHTML = `<div class="col-12"><div class="muted-text">ç¡æ³è¼å¥å¤§ç¤è³è¨</div></div>`;
+    document.getElementById('marketSection').innerHTML = `<div class="col-12"><div class="muted-text">Failed to load market data</div></div>`;
   }
 }
 
-// âââ Revenue âââââââââââââââââââââââââââââââââââââââââââââ
+// ─── Revenue ─────────────────────────────────────────────
 async function loadRevenue(stockId) {
-  document.getElementById('revenueArea').innerHTML = `<div class="loading"><div class="spinner"></div> è¼å¥æçæ¶â¦</div>`;
+  document.getElementById('revenueArea').innerHTML = `<div class="loading"><div class="spinner"></div> Loading revenue...</div>`;
   try {
     const d = await fetch(`/api/revenue/${stockId}`).then(r => r.json());
     if (!d.data || d.data.length === 0) {
-      document.getElementById('revenueArea').innerHTML = `<div class="loading">æ¥ç¡è³æ</div>`; return;
+      document.getElementById('revenueArea').innerHTML = `<div class="loading">No data found</div>`; return;
     }
     // Reverse so oldest is left, newest is right
     const rows = [...d.data].reverse();
@@ -515,8 +515,8 @@ async function loadRevenue(stockId) {
     document.getElementById('revenueArea').innerHTML = `
       <div class="chart-wrap"><canvas id="revenueChart"></canvas></div>
       <div class="d-flex justify-content-between mt-2 muted-text px-1">
-        <span>ææ°æçæ¶ï¼<strong style="color:#c9d1d9">${fmtM(latest)}</strong></span>
-        <span>YoYï¼<span class="${(latestYoy||0) >= 0 ? 'pos' : 'neg'}">${(latestYoy||0).toFixed(1)}%</span></span>
+        <span>Latest Revenue: <strong style="color:#c9d1d9">${fmtM(latest)}</strong></span>
+        <span>YoY: <span class="${(latestYoy||0) >= 0 ? 'pos' : 'neg'}">${(latestYoy||0).toFixed(1)}%</span></span>
       </div>`;
 
     destroyChart(revenueChart);
@@ -526,7 +526,7 @@ async function loadRevenue(stockId) {
       data: {
         labels,
         datasets: [{
-          label: 'æçæ¶',
+          label: 'Monthly Revenue',
           data: values,
           backgroundColor: values.map((_, i) => i === values.length - 1 ? 'rgba(88,166,255,.9)' : 'rgba(88,166,255,.45)'),
           borderRadius: 4, borderSkipped: false,
@@ -542,17 +542,17 @@ async function loadRevenue(stockId) {
       }
     });
   } catch (e) {
-    document.getElementById('revenueArea').innerHTML = `<div class="loading">è¼å¥å¤±æï¼${e.message}</div>`;
+    document.getElementById('revenueArea').innerHTML = `<div class="loading">Load failed: ${e.message}</div>`;
   }
 }
 
-// âââ Institutional ââââââââââââââââââââââââââââââââââââââââ
+// ─── Institutional ────────────────────────────────────────
 async function loadInstitutional(stockId) {
-  document.getElementById('instArea').innerHTML = `<div class="loading"><div class="spinner"></div> è¼å¥ä¸å¤§æ³äººâ¦</div>`;
+  document.getElementById('instArea').innerHTML = `<div class="loading"><div class="spinner"></div> Loading institutional data...</div>`;
   try {
     const d = await fetch(`/api/institutional/${stockId}`).then(r => r.json());
     if (!d.data || d.data.length === 0) {
-      document.getElementById('instArea').innerHTML = `<div class="loading">æ¥ç¡è³æ</div>`; return;
+      document.getElementById('instArea').innerHTML = `<div class="loading">No data found</div>`; return;
     }
     const labels  = d.data.map(r => r.date.slice(5));
     const foreign = d.data.map(r => r.foreign);
@@ -564,15 +564,15 @@ async function loadInstitutional(stockId) {
 
     document.getElementById('instArea').innerHTML = `
       <div class="inst-legend">
-        <span><span class="dot" style="background:#58a6ff"></span>å¤è³</span>
-        <span><span class="dot" style="background:#3fb950"></span>æä¿¡</span>
-        <span><span class="dot" style="background:#d29922"></span>èªçå</span>
+        <span><span class="dot" style="background:#58a6ff"></span>Foreign</span>
+        <span><span class="dot" style="background:#3fb950"></span>Trust</span>
+        <span><span class="dot" style="background:#d29922"></span>Dealer</span>
       </div>
       <div class="chart-wrap"><canvas id="instChart"></canvas></div>
       <div class="d-flex justify-content-around mt-2 muted-text text-center">
-        <span>å¤è³ç´¯è¨<br/><strong style="color:#58a6ff">${colorSign(sumF)}</strong></span>
-        <span>æä¿¡ç´¯è¨<br/><strong style="color:#3fb950">${colorSign(sumI)}</strong></span>
-        <span>èªçåç´¯è¨<br/><strong style="color:#d29922">${colorSign(sumD)}</strong></span>
+        <span>Foreign Total<br/><strong style="color:#58a6ff">${colorSign(sumF)}</strong></span>
+        <span>Trust Total<br/><strong style="color:#3fb950">${colorSign(sumI)}</strong></span>
+        <span>Dealer Total<br/><strong style="color:#d29922">${colorSign(sumD)}</strong></span>
       </div>`;
 
     destroyChart(instChart);
@@ -582,9 +582,9 @@ async function loadInstitutional(stockId) {
       data: {
         labels,
         datasets: [
-          { label: 'å¤è³', data: foreign, backgroundColor: 'rgba(88,166,255,.7)', borderRadius: 2 },
-          { label: 'æä¿¡', data: invest,  backgroundColor: 'rgba(63,185,80,.7)',  borderRadius: 2 },
-          { label: 'èªçå', data: dealer, backgroundColor: 'rgba(210,153,34,.7)', borderRadius: 2 },
+          { label: 'Foreign', data: foreign, backgroundColor: 'rgba(88,166,255,.7)', borderRadius: 2 },
+          { label: 'Trust', data: invest,  backgroundColor: 'rgba(63,185,80,.7)',  borderRadius: 2 },
+          { label: 'Dealer', data: dealer, backgroundColor: 'rgba(210,153,34,.7)', borderRadius: 2 },
         ]
       },
       options: {
@@ -597,17 +597,17 @@ async function loadInstitutional(stockId) {
       }
     });
   } catch (e) {
-    document.getElementById('instArea').innerHTML = `<div class="loading">è¼å¥å¤±æï¼${e.message}</div>`;
+    document.getElementById('instArea').innerHTML = `<div class="loading">Load failed: ${e.message}</div>`;
   }
 }
 
-// âââ Financial ââââââââââââââââââââââââââââââââââââââââââââ
+// ─── Financial ───────────────────────────────────────────
 async function loadFinancial(stockId) {
-  document.getElementById('finArea').innerHTML = `<div class="loading"><div class="spinner"></div> è¼å¥è²¡åå ±è¡¨â¦</div>`;
+  document.getElementById('finArea').innerHTML = `<div class="loading"><div class="spinner"></div> Loading financials...</div>`;
   try {
     const d = await fetch(`/api/financial/${stockId}`).then(r => r.json());
     if (!d.data || d.data.length === 0) {
-      document.getElementById('finArea').innerHTML = `<div class="loading">æ¥ç¡è³æ</div>`; return;
+      document.getElementById('finArea').innerHTML = `<div class="loading">No data found</div>`; return;
     }
     const rows = [...d.data].reverse();
     const tableRows = rows.map(r => `
@@ -617,7 +617,7 @@ async function loadFinancial(stockId) {
         <td>${fmtM(r.opIncome)}</td>
         <td>${fmtM(r.netIncome)}</td>
         <td class="${r.eps >= 0 ? 'pos' : 'neg'}">${r.eps.toFixed(2)}</td>
-        <td class="${r.revenue ? (r.opIncome / r.revenue * 100 > 0 ? 'pos' : 'neg') : ''}">${r.revenue ? (r.opIncome / r.revenue * 100).toFixed(1) + '%' : 'â'}</td>
+        <td class="${r.revenue ? (r.opIncome / r.revenue * 100 > 0 ? 'pos' : 'neg') : ''}">${r.revenue ? (r.opIncome / r.revenue * 100).toFixed(1) + '%' : '–'}</td>
       </tr>
     `).join('');
 
@@ -627,14 +627,14 @@ async function loadFinancial(stockId) {
           <div style="overflow-x:auto">
             <table class="table-fin">
               <thead><tr>
-                <th>å­£åº¦</th><th>çæ¥­æ¶å¥</th><th>çæ¥­å©ç</th><th>æ¬ææ·¨å©</th><th>EPS</th><th>ççç</th>
+                <th>Quarter</th><th>Revenue</th><th>Op. Income</th><th>Net Income</th><th>EPS</th><th>Op. Margin</th>
               </tr></thead>
               <tbody>${tableRows}</tbody>
             </table>
           </div>
         </div>
         <div class="col-lg-5">
-          <div style="font-size:.75rem;color:var(--muted);margin-bottom:6px">EPS è¶¨å¢ï¼åï¼</div>
+          <div style="font-size:.75rem;color:var(--muted);margin-bottom:6px">EPS Trend (TWD)</div>
           <div class="chart-wrap" style="height:200px"><canvas id="epsChart"></canvas></div>
         </div>
       </div>`;
@@ -654,7 +654,7 @@ async function loadFinancial(stockId) {
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` EPS: ${ctx.raw.toFixed(2)} å` } } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` EPS: ${ctx.raw.toFixed(2)} TWD` } } },
         scales: {
           x: { grid: { display: false } },
           y: { grid: { color: '#21262d' } }
@@ -662,11 +662,11 @@ async function loadFinancial(stockId) {
       }
     });
   } catch (e) {
-    document.getElementById('finArea').innerHTML = `<div class="loading">è¼å¥å¤±æï¼${e.message}</div>`;
+    document.getElementById('finArea').innerHTML = `<div class="loading">Load failed: ${e.message}</div>`;
   }
 }
 
-// âââ Load All âââââââââââââââââââââââââââââââââââââââââââââ
+// ─── Load All ─────────────────────────────────────────────
 function loadAll() {
   const stockId = document.getElementById('stockInput').value.trim();
   if (!stockId) return;
@@ -683,7 +683,7 @@ function loadAll() {
 
 document.getElementById('stockInput').addEventListener('keydown', e => { if (e.key === 'Enter') loadAll(); });
 
-// Init â check URL params
+// Init – check URL params
 (function init() {
   const params = new URLSearchParams(window.location.search);
   const s = params.get('stock');
