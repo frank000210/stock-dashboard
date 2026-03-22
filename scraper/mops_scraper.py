@@ -1,5 +1,5 @@
 """
-MOPS Scraper — Fetches monthly revenue & quarterly financial statements
+MOPS Scraper â Fetches monthly revenue & quarterly financial statements
 from mops.twse.com.tw and stores them in MongoDB.
 
 Run locally (residential IP) since MOPS blocks cloud/datacenter IPs.
@@ -25,7 +25,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Config ──────────────────────────────────────────────────────────
+# ââ Config ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 MONGODB_URI = os.getenv("MONGODB_URI", "")
 STOCK_IDS = [s.strip() for s in os.getenv("STOCK_IDS", "2330").split(",") if s.strip()]
 
@@ -64,9 +64,9 @@ def connect_db():
     return db
 
 
-# ── Revenue Scraper ─────────────────────────────────────────────────
+# ââ Revenue Scraper âââââââââââââââââââââââââââââââââââââââââââââââââ
 def to_num(s):
-    """Parse a number string like '317,656,613' → int."""
+    """Parse a number string like '317,656,613' â int."""
     if not s:
         return 0
     return int(re.sub(r"[,\s]", "", str(s))) if re.sub(r"[,\s]", "", str(s)).lstrip("-").isdigit() else 0
@@ -106,9 +106,9 @@ def scrape_revenue(db, stock_id, months=15):
             rows = result.get("data", [])
             yymm = result.get("yymm", "")
 
-            month_row = next((r for r in rows if r[0] == "本月"), None)
-            cum_row = next((r for r in rows if r[0] == "累計"), None)
-            yoy_row = next((r for r in rows if r[0] and "去年同期" in r[0]), None)
+            month_row = next((r for r in rows if r[0] == "æ¬æ"), None)
+            cum_row = next((r for r in rows if r[0] == "ç´¯è¨"), None)
+            yoy_row = next((r for r in rows if r[0] and "å»å¹´åæ" in r[0]), None)
 
             if month_row and to_num(month_row[1]) > 0:
                 tw_y = yymm[: len(yymm) - 2]
@@ -120,7 +120,7 @@ def scrape_revenue(db, stock_id, months=15):
                     "period": period,
                     "revenue": to_num(month_row[1]) * 1000,
                     "cum_revenue": to_num(cum_row[1]) * 1000 if cum_row else 0,
-                    "yoy": float(yoy_row[1]) if yoy_row and yoy_row[1] else 0,
+                    "yoy": to_num(yoy_row[1]) if yoy_row and yoy_row[1] else 0,
                     "tw_year": int(tw_y),
                     "tw_month": int(tw_m),
                     "updated_at": datetime.utcnow(),
@@ -153,7 +153,7 @@ def scrape_revenue(db, stock_id, months=15):
     )
 
 
-# ── Financial Statements Scraper ────────────────────────────────────
+# ââ Financial Statements Scraper ââââââââââââââââââââââââââââââââââââ
 def scrape_financial(db, stock_id, quarters=8):
     """Scrape quarterly financial statements from MOPS and upsert into MongoDB."""
     log.info(f"[{stock_id}] Scraping financial statements (last {quarters} quarters)...")
@@ -203,13 +203,13 @@ def scrape_financial(db, stock_id, quarters=8):
                 label = (row[0] or "").strip()
                 val_str = re.sub(r"[,\s]", "", str(row[1])) if row[1] else "0"
 
-                if label == "營業收入合計":
+                if label == "çæ¥­æ¶å¥åè¨":
                     revenue = to_num(val_str) * 1000
-                elif label == "營業利益（損失）":
+                elif label == "çæ¥­å©çï¼æå¤±ï¼":
                     op_income = to_num(val_str) * 1000
-                elif "本期淨利" in label and "歸" not in label:
+                elif "æ¬ææ·¨å©" in label and "æ­¸" not in label:
                     net_income = to_num(val_str) * 1000
-                elif label.replace(" ", "") == "基本每股盈餘":
+                elif label.replace(" ", "") == "åºæ¬æ¯è¡çé¤":
                     try:
                         eps = float(val_str)
                     except ValueError:
@@ -219,7 +219,7 @@ def scrape_financial(db, stock_id, quarters=8):
             if eps == 0:
                 for row in report_list:
                     lbl = (row[0] or "").replace(" ", "").strip()
-                    if lbl == "基本每股盈餘" and row[1]:
+                    if lbl == "åºæ¬æ¯è¡çé¤" and row[1]:
                         try:
                             eps = float(re.sub(r"[,\s]", "", str(row[1])))
                             if eps != 0:
@@ -270,7 +270,7 @@ def scrape_financial(db, stock_id, quarters=8):
     )
 
 
-# ── Main ────────────────────────────────────────────────────────────
+# ââ Main ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 def run_all(db):
     """Run all scrapers for all configured stock IDs."""
     log.info(f"Starting scrape for stocks: {STOCK_IDS}")
