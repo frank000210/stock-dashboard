@@ -69,9 +69,15 @@ def scrape_monthly_revenue(db, stock_ids, months=15):
             try:
                 resp = SESSION.get(url, timeout=15)
                 resp.encoding = "big5"
+                log.info(f"[DEBUG] Revenue GET {url} => status={resp.status_code}, len={len(resp.text)}")
+                if resp.status_code != 200:
+                    log.warning(f"[DEBUG] Non-200 response: {resp.text[:300]}")
+                    continue
                 html_dfs = pd.read_html(resp.text)
+                log.info(f"[DEBUG] Found {len(html_dfs)} tables, shapes: {[df.shape for df in html_dfs[:5]]}")
                 valid_dfs = [df for df in html_dfs if df.shape[1] == 11]
                 if not valid_dfs:
+                    log.info(f"[DEBUG] No 11-col tables found")
                     continue
 
                 df = pd.concat(valid_dfs)
@@ -80,6 +86,7 @@ def scrape_monthly_revenue(db, stock_ids, months=15):
                 df = df.reset_index(drop=True)
                 col_names = list(df.columns)
                 stock_no_col = col_names[0]
+                log.info(f"[DEBUG] Revenue {tw_year}/{month}: {len(df)} rows, cols={list(df.columns)[:3]}")
 
                 for _, row in df.iterrows():
                     sid = str(row[stock_no_col]).strip()
@@ -120,7 +127,7 @@ def scrape_monthly_revenue(db, stock_ids, months=15):
                         log.debug(f"[{sid}] Row parse error: {e}")
 
             except Exception as e:
-                log.debug(f"Revenue {tw_year}/{month} url={url} error: {e}")
+                log.warning(f"Revenue {tw_year}/{month} url={url} error: {e}")
 
             time.sleep(0.5)
 
@@ -225,11 +232,14 @@ def _scrape_income_statement(tw_year, season, stock_set):
 
     resp = SESSION.post(url, data=form_data, timeout=30)
     resp.encoding = "utf8"
+    log.info(f"[DEBUG] Income POST {tw_year}/Q{season}: status={resp.status_code}, len={len(resp.text)}, first300={resp.text[:300]}")
     soup = BeautifulSoup(resp.text, "html.parser")
     tables = soup.find_all("table", {"class": "hasBorder"})
+    log.info(f"[DEBUG] Income {tw_year}/Q{season}: found {len(tables)} hasBorder tables")
 
     results = {}
     data = _parse_html_tables(tables)
+    log.info(f"[DEBUG] Income {tw_year}/Q{season}: parsed {len(data)} rows from tables")
 
     header_row = None
     eps_col_idx = -1
@@ -241,6 +251,7 @@ def _scrape_income_statement(tw_year, season, stock_set):
                 if "基本每股盈餘" in col_name:
                     eps_col_idx = j
                     break
+            log.info(f"[DEBUG] Found header, eps_col_idx={eps_col_idx}, cols={header_row[:3]}")
             continue
 
         if header_row and eps_col_idx > 0 and row_data:
@@ -270,6 +281,7 @@ def _scrape_balance_sheet(tw_year, season, stock_set):
 
     resp = SESSION.post(url, data=form_data, timeout=30)
     resp.encoding = "utf8"
+    log.info(f"[DEBUG] Balance POST {tw_year}/Q{season}: status={resp.status_code}, len={len(resp.text)}")
     soup = BeautifulSoup(resp.text, "html.parser")
     tables = soup.find_all("table", {"class": "hasBorder"})
 
