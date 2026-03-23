@@ -1,12 +1,20 @@
 """
-MOPS Scraper - Fetches monthly revenue & quarterly financial statements
-from mops.twse.com.tw (HTML endpoints) and stores them in MongoDB.
+MOPS / TWSE OpenAPI Scraper
+============================
+Fetches monthly revenue & quarterly financial statements from the
+Taiwan Stock Exchange (TWSE) OpenAPI and stores them in MongoDB.
 
-Uses the traditional HTML scraping approach (not JSON API) which is more reliable.
+Endpoints used (JSON, no anti-bot blocking):
+  - Revenue:          /v1/opendata/t187ap05_L   (上市公司每月營業收入彙總表)
+  - Income statement: /v1/opendata/t187ap06_L_* (上市公司綜合損益表, 各產業)
+  - Balance sheet:    /v1/opendata/t187ap07_L_* (上市公司資產負債表, 各產業)
+
+Note: OpenAPI only returns the LATEST period. Run this scraper regularly
+      (e.g. daily) to accumulate historical data in MongoDB.
 
 Usage:
     python mops_scraper.py             # one-time run
-    python mops_scraper.py --watch     # run on schedule
+    python mops_scraper.py --watch     # run on schedule (daily)
 """
 
 import os
@@ -14,25 +22,37 @@ import re
 import sys
 import time
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import requests
+import urllib3
 import pandas as pd
-from bs4 import BeautifulSoup
 from pymongo import MongoClient, UpdateOne
+from dotenv import load_dotenv
+
+# Suppress SSL warnings — government certs sometimes lack Subject Key Identifier
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Load .env file from the same directory as this script
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 # --------------- config ---------------
 MONGODB_URI = os.getenv("MONGODB_URI", "")
 STOCK_IDS = [s.strip() for s in os.getenv("STOCK_IDS", "2330").split(",") if s.strip()]
-SCHEDULE_HOUR = int(os.getenv("SCHEDULE_HOUR", "17"))  # default 5PM Taiwan time
+SCHEDULE_HOUR = int(os.getenv("SCHEDULE_HOUR", "17"))  # default 5 PM Taiwan time
+
+TWSE_BASE = "https://openapi.twse.com.tw/v1"
+REQUEST_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) DataPipeline/1.0",
+}
+
+# Industry suffixes for income statement & balance sheet endpoints
+INDUSTRY_SUFFIXES = ["ci", "fh", "basi", "bd", "ins", "mim"]
+#  ci=一般業, fh=金控業, basi=金融業, bd=證券期貨業, ins=保險業, mim=異業
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("mops")
-
-SESSION = requests.Session()
-SESSION.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-})
 
 
 # --------------- DB ---------------
@@ -47,305 +67,247 @@ def connect_db():
     return db
 
 
-# --------------- Monthly Revenue ---------------
-def scrape_monthly_revenue(db, stock_ids, months=15):
-    log.info(f"Scraping monthly revenue for {len(stock_ids)} stocks (last {months} months)...")
-    now = datetime.now()
-    ops = []
-    stock_set = set(stock_ids)
-
-    for i in range(months):
-        d = datetime(now.year, now.month, 1) - timedelta(days=i * 30)
-        d = datetime(d.year, d.month, 1)
-        tw_year = d.year - 1911
-        month = d.month
-
-        urls = [
-            f"https://mops.twse.com.tw/nas/t21/sii/t21sc03_{tw_year}_{month}_0.html",
-            f"https://mops.twse.com.tw/nas/t21/sii/t21sc03_{tw_year}_{month}_1.html",
-        ]
-
-        for url in urls:
-            try:
-                resp = SESSION.get(url, timeout=15)
-                resp.encoding = "big5"
-                log.info(f"[DEBUG] Revenue GET {url} => status={resp.status_code}, len={len(resp.text)}")
-                if resp.status_code != 200:
-                    log.warning(f"[DEBUG] Non-200 response: {resp.text[:300]}")
-                    continue
-                html_dfs = pd.read_html(resp.text)
-                log.info(f"[DEBUG] Found {len(html_dfs)} tables, shapes: {[df.shape for df in html_dfs[:5]]}")
-                valid_dfs = [df for df in html_dfs if df.shape[1] == 11]
-                if not valid_dfs:
-                    log.info(f"[DEBUG] No 11-col tables found")
-                    continue
-
-                df = pd.concat(valid_dfs)
-                df.columns = df.columns.get_level_values(1) if isinstance(df.columns, pd.MultiIndex) else df.columns
-                df = df[df.iloc[:, 1] != "合計"]
-                df = df.reset_index(drop=True)
-                col_names = list(df.columns)
-                stock_no_col = col_names[0]
-                log.info(f"[DEBUG] Revenue {tw_year}/{month}: {len(df)} rows, cols={list(df.columns)[:3]}")
-
-                for _, row in df.iterrows():
-                    sid = str(row[stock_no_col]).strip()
-                    if sid not in stock_set:
-                        continue
-
-                    try:
-                        revenue = parse_num(row.iloc[2])
-                        last_month_rev = parse_num(row.iloc[3])
-                        last_year_rev = parse_num(row.iloc[4])
-                        mom_pct = parse_num(row.iloc[5])
-                        yoy_pct = parse_num(row.iloc[6])
-                        cum_revenue = parse_num(row.iloc[7])
-                        last_year_cum = parse_num(row.iloc[8])
-
-                        period = f"{tw_year}/{month:02d}"
-                        doc = {
-                            "stock_id": sid,
-                            "period": period,
-                            "revenue": revenue * 1000,
-                            "last_month_revenue": last_month_rev * 1000,
-                            "last_year_revenue": last_year_rev * 1000,
-                            "mom_pct": mom_pct,
-                            "yoy": yoy_pct,
-                            "cum_revenue": cum_revenue * 1000,
-                            "last_year_cum_revenue": last_year_cum * 1000,
-                            "tw_year": tw_year,
-                            "tw_month": month,
-                            "updated_at": datetime.utcnow(),
-                        }
-                        ops.append(UpdateOne(
-                            {"stock_id": sid, "period": period},
-                            {"$set": doc},
-                            upsert=True,
-                        ))
-                        log.info(f"[{sid}] Revenue {period}: {revenue * 1000:,.0f}")
-                    except Exception as e:
-                        log.debug(f"[{sid}] Row parse error: {e}")
-
-            except Exception as e:
-                log.warning(f"Revenue {tw_year}/{month} url={url} error: {e}")
-
-            time.sleep(0.5)
-
-    if ops:
-        result = db["revenue"].bulk_write(ops)
-        log.info(f"Revenue: upserted={result.upserted_count}, modified={result.modified_count}")
-    else:
-        log.warning("No revenue data scraped")
+# --------------- API helpers ---------------
+def fetch_json(endpoint: str) -> list | None:
+    """Fetch a TWSE OpenAPI JSON endpoint. Returns list of dicts or None."""
+    url = f"{TWSE_BASE}{endpoint}"
+    try:
+        resp = requests.get(url, headers=REQUEST_HEADERS, timeout=30, verify=False)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data:
+            log.warning(f"{endpoint}: returned empty data")
+            return None
+        log.info(f"{endpoint}: got {len(data)} records")
+        return data
+    except requests.exceptions.RequestException as e:
+        log.error(f"{endpoint}: request failed — {e}")
+        return None
+    except ValueError as e:
+        log.error(f"{endpoint}: JSON parse failed — {e}")
+        return None
 
 
-# --------------- Quarterly Financial (EPS, NAV) ---------------
-def scrape_financial(db, stock_ids, quarters=8):
-    log.info(f"Scraping quarterly financial for {len(stock_ids)} stocks (last {quarters} quarters)...")
-    now = datetime.now()
-    tw_year_now = now.year - 1911
-    stock_set = set(stock_ids)
-    ops = []
-
-    quarter_list = []
-    current_q = (now.month - 1) // 3
-    if current_q == 0:
-        current_q = 4
-        start_year = tw_year_now - 1
-    else:
-        start_year = tw_year_now
-
-    for i in range(quarters):
-        q = current_q - i
-        y = start_year
-        while q <= 0:
-            q += 4
-            y -= 1
-        quarter_list.append((y, q))
-
-    for tw_year, season in quarter_list:
-        try:
-            eps_data = _scrape_income_statement(tw_year, season, stock_set)
-            for sid, eps_val in eps_data.items():
-                q_map = {1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"}
-                period = f"{tw_year + 1911}{q_map[season]}"
-                ops.append(UpdateOne(
-                    {"stock_id": sid, "period": period},
-                    {"$set": {
-                        "stock_id": sid,
-                        "period": period,
-                        "eps": eps_val,
-                        "year": tw_year + 1911,
-                        "season": season,
-                        "updated_at": datetime.utcnow(),
-                    },
-                     "$setOnInsert": {
-                         "revenue": 0,
-                         "operating_income": 0,
-                         "net_income": 0,
-                     }},
-                    upsert=True,
-                ))
-                log.info(f"[{sid}] EPS {period}: {eps_val}")
-        except Exception as e:
-            log.warning(f"EPS {tw_year}/Q{season} error: {e}")
-
-        time.sleep(3)
-
-        try:
-            nav_data = _scrape_balance_sheet(tw_year, season, stock_set)
-            for sid, nav_val in nav_data.items():
-                q_map = {1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"}
-                period = f"{tw_year + 1911}{q_map[season]}"
-                ops.append(UpdateOne(
-                    {"stock_id": sid, "period": period},
-                    {"$set": {
-                        "nav_per_share": nav_val,
-                        "updated_at": datetime.utcnow(),
-                    }},
-                    upsert=True,
-                ))
-                log.info(f"[{sid}] NAV {period}: {nav_val}")
-        except Exception as e:
-            log.warning(f"NAV {tw_year}/Q{season} error: {e}")
-
-        time.sleep(3)
-
-    if ops:
-        result = db["financial"].bulk_write(ops)
-        log.info(f"Financial: upserted={result.upserted_count}, modified={result.modified_count}")
-    else:
-        log.warning("No financial data scraped")
-
-
-def _scrape_income_statement(tw_year, season, stock_set):
-    url = "https://mops.twse.com.tw/mops/web/ajax_t163sb04"
-    form_data = {
-        "encodeURIComponent": 1,
-        "isQuery": "Y",
-        "step": 1,
-        "TYPEK": "sii",
-        "year": tw_year,
-        "firstin": 1,
-        "off": 1,
-        "season": season,
-    }
-
-    resp = SESSION.post(url, data=form_data, timeout=30)
-    resp.encoding = "utf8"
-    log.info(f"[DEBUG] Income POST {tw_year}/Q{season}: status={resp.status_code}, len={len(resp.text)}, first300={resp.text[:300]}")
-    soup = BeautifulSoup(resp.text, "html.parser")
-    tables = soup.find_all("table", {"class": "hasBorder"})
-    log.info(f"[DEBUG] Income {tw_year}/Q{season}: found {len(tables)} hasBorder tables")
-
-    results = {}
-    data = _parse_html_tables(tables)
-    log.info(f"[DEBUG] Income {tw_year}/Q{season}: parsed {len(data)} rows from tables")
-
-    header_row = None
-    eps_col_idx = -1
-
-    for row_data in data:
-        if row_data and row_data[0] == "公司代號":
-            header_row = row_data
-            for j, col_name in enumerate(header_row):
-                if "基本每股盈餘" in col_name:
-                    eps_col_idx = j
-                    break
-            log.info(f"[DEBUG] Found header, eps_col_idx={eps_col_idx}, cols={header_row[:3]}")
-            continue
-
-        if header_row and eps_col_idx > 0 and row_data:
-            sid = str(row_data[0]).strip()
-            if sid in stock_set and len(row_data) > eps_col_idx:
-                eps_str = row_data[eps_col_idx]
-                eps_val = parse_num(eps_str)
-                if eps_val != 0 or eps_str.strip() == "0" or eps_str.strip() == "0.00":
-                    results[sid] = eps_val
-
-    log.info(f"Income statement {tw_year}/Q{season}: found {len(results)} stocks")
-    return results
-
-
-def _scrape_balance_sheet(tw_year, season, stock_set):
-    url = "https://mops.twse.com.tw/mops/web/ajax_t163sb05"
-    form_data = {
-        "encodeURIComponent": 1,
-        "isQuery": "Y",
-        "step": 1,
-        "TYPEK": "sii",
-        "year": tw_year,
-        "firstin": 1,
-        "off": 1,
-        "season": season,
-    }
-
-    resp = SESSION.post(url, data=form_data, timeout=30)
-    resp.encoding = "utf8"
-    log.info(f"[DEBUG] Balance POST {tw_year}/Q{season}: status={resp.status_code}, len={len(resp.text)}")
-    soup = BeautifulSoup(resp.text, "html.parser")
-    tables = soup.find_all("table", {"class": "hasBorder"})
-
-    results = {}
-    data = _parse_html_tables(tables)
-
-    header_row = None
-    nav_col_idx = -1
-
-    for row_data in data:
-        if row_data and row_data[0] == "公司代號":
-            header_row = row_data
-            for j, col_name in enumerate(header_row):
-                if "每股參考淨值" in col_name:
-                    nav_col_idx = j
-                    break
-            continue
-
-        if header_row and nav_col_idx > 0 and row_data:
-            sid = str(row_data[0]).strip()
-            if sid in stock_set and len(row_data) > nav_col_idx:
-                nav_str = row_data[nav_col_idx]
-                nav_val = parse_num(nav_str)
-                if nav_val != 0:
-                    results[sid] = nav_val
-
-    log.info(f"Balance sheet {tw_year}/Q{season}: found {len(results)} stocks")
-    return results
-
-
-def _parse_html_tables(tables):
-    data = []
-    for tb in tables:
-        for row in tb.find_all("tr"):
-            tempdata = []
-            for col in row.find_all("th"):
-                tempdata.append(col.text.strip().replace("　", ""))
-            for col in row.find_all("td"):
-                tempdata.append(col.text.strip().replace("　", ""))
-            if len(tempdata) > 1:
-                data.append(tempdata)
-    return data
-
-
-# --------------- Utilities ---------------
-def parse_num(s):
+def parse_num(s) -> float:
+    """Parse a number string like '317,656,613' or '35.92' to float."""
     if s is None or (isinstance(s, float) and pd.isna(s)):
         return 0.0
     try:
         cleaned = re.sub(r"[,\s%]", "", str(s).strip())
-        if not cleaned or cleaned in ("-", "不適用", "N/A", "--"):
+        if not cleaned or cleaned in ("-", "不適用", "N/A", "--", ""):
             return 0.0
         return float(cleaned)
     except (ValueError, TypeError):
         return 0.0
 
 
+# --------------- Monthly Revenue (月營收) ---------------
+def scrape_monthly_revenue(db, stock_ids):
+    """
+    Fetch latest monthly revenue from TWSE OpenAPI t187ap05_L.
+    Returns all listed companies' revenue for the most recent month.
+    """
+    log.info("=== Scraping monthly revenue (t187ap05_L) ===")
+    stock_set = set(stock_ids)
+
+    data = fetch_json("/opendata/t187ap05_L")
+    if not data:
+        log.warning("No revenue data returned from API")
+        return
+
+    ops = []
+    for row in data:
+        sid = str(row.get("公司代號", "")).strip()
+        if sid not in stock_set:
+            continue
+
+        period_str = str(row.get("資料年月", "")).strip()  # e.g. "11402" → 民國114年2月
+        revenue = parse_num(row.get("營業收入-當月營收"))
+        last_month_rev = parse_num(row.get("營業收入-上月營收"))
+        last_year_rev = parse_num(row.get("營業收入-去年當月營收"))
+        mom_pct = parse_num(row.get("營業收入-上月比較增減(%)"))
+        yoy_pct = parse_num(row.get("營業收入-去年同月增減(%)"))
+        cum_revenue = parse_num(row.get("累計營業收入-當月累計營收"))
+        last_year_cum = parse_num(row.get("累計營業收入-去年累計營收"))
+
+        # Parse period: "11402" → tw_year=114, month=02
+        if len(period_str) >= 4:
+            tw_year = int(period_str[:-2]) if len(period_str) > 2 else 0
+            tw_month = int(period_str[-2:]) if len(period_str) >= 2 else 0
+        else:
+            tw_year, tw_month = 0, 0
+
+        period = f"{tw_year}/{tw_month:02d}"
+
+        doc = {
+            "stock_id": sid,
+            "company_name": row.get("公司名稱", ""),
+            "industry": row.get("產業別", ""),
+            "period": period,
+            "revenue": revenue * 1000,          # 千元 → 元
+            "last_month_revenue": last_month_rev * 1000,
+            "last_year_revenue": last_year_rev * 1000,
+            "mom_pct": mom_pct,
+            "yoy": yoy_pct,
+            "cum_revenue": cum_revenue * 1000,
+            "last_year_cum_revenue": last_year_cum * 1000,
+            "tw_year": tw_year,
+            "tw_month": tw_month,
+            "updated_at": datetime.now(),
+        }
+
+        ops.append(UpdateOne(
+            {"stock_id": sid, "period": period},
+            {"$set": doc},
+            upsert=True,
+        ))
+        log.info(f"  [{sid}] {row.get('公司名稱', '')} Revenue {period}: {revenue * 1000:,.0f}")
+
+    if ops:
+        result = db["revenue"].bulk_write(ops)
+        log.info(f"Revenue: upserted={result.upserted_count}, modified={result.modified_count}")
+    else:
+        log.warning("No matching revenue records for target stocks")
+
+
+# --------------- Quarterly Financial (EPS + 每股淨值) ---------------
+def scrape_financial(db, stock_ids):
+    """
+    Fetch latest quarterly financial data from TWSE OpenAPI:
+      - t187ap06_L_* (綜合損益表) → EPS
+      - t187ap07_L_* (資產負債表) → 每股參考淨值
+    Must query multiple industry-specific endpoints to cover all stocks.
+    """
+    log.info("=== Scraping quarterly financials ===")
+    stock_set = set(stock_ids)
+    ops = []
+
+    # --- EPS from 綜合損益表 ---
+    log.info("--- Fetching income statements (EPS) ---")
+    eps_found = {}
+
+    for suffix in INDUSTRY_SUFFIXES:
+        endpoint = f"/opendata/t187ap06_L_{suffix}"
+        data = fetch_json(endpoint)
+        if not data:
+            continue
+
+        for row in data:
+            sid = str(row.get("公司代號", "")).strip()
+            if sid not in stock_set or sid in eps_found:
+                continue
+
+            year_str = str(row.get("年度", "")).strip()
+            season_str = str(row.get("季別", "")).strip()
+            eps_val = parse_num(row.get("基本每股盈餘（元）"))
+
+            if not year_str or not season_str:
+                continue
+
+            tw_year = int(year_str)
+            season = int(season_str)
+            ad_year = tw_year + 1911
+            q_map = {1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"}
+            period = f"{ad_year}{q_map.get(season, f'Q{season}')}"
+
+            # Also grab other useful income fields
+            revenue_q = parse_num(row.get("營業收入"))
+            operating_income = parse_num(row.get("營業利益（損失）"))
+            net_income = parse_num(row.get("本期淨利（淨損）"))
+            net_income_parent = parse_num(row.get("淨利（淨損）歸屬於母公司業主"))
+
+            eps_found[sid] = True
+
+            doc = {
+                "stock_id": sid,
+                "company_name": row.get("公司名稱", ""),
+                "period": period,
+                "year": ad_year,
+                "season": season,
+                "eps": eps_val,
+                "revenue": revenue_q * 1000,
+                "operating_income": operating_income * 1000,
+                "net_income": net_income * 1000,
+                "net_income_parent": net_income_parent * 1000,
+                "updated_at": datetime.now(),
+            }
+
+            ops.append(UpdateOne(
+                {"stock_id": sid, "period": period},
+                {"$set": doc},
+                upsert=True,
+            ))
+            log.info(f"  [{sid}] {row.get('公司名稱', '')} EPS {period}: {eps_val}")
+
+        time.sleep(1)
+
+    # --- 每股參考淨值 from 資產負債表 ---
+    log.info("--- Fetching balance sheets (NAV per share) ---")
+    nav_found = {}
+
+    for suffix in INDUSTRY_SUFFIXES:
+        endpoint = f"/opendata/t187ap07_L_{suffix}"
+        data = fetch_json(endpoint)
+        if not data:
+            continue
+
+        for row in data:
+            sid = str(row.get("公司代號", "")).strip()
+            if sid not in stock_set or sid in nav_found:
+                continue
+
+            year_str = str(row.get("年度", "")).strip()
+            season_str = str(row.get("季別", "")).strip()
+            nav_val = parse_num(row.get("每股參考淨值"))
+
+            if not year_str or not season_str:
+                continue
+
+            tw_year = int(year_str)
+            season = int(season_str)
+            ad_year = tw_year + 1911
+            q_map = {1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"}
+            period = f"{ad_year}{q_map.get(season, f'Q{season}')}"
+
+            nav_found[sid] = True
+
+            # Also grab balance sheet highlights
+            total_assets = parse_num(row.get("資產總額"))
+            total_liabilities = parse_num(row.get("負債總額"))
+            total_equity = parse_num(row.get("權益總額"))
+
+            ops.append(UpdateOne(
+                {"stock_id": sid, "period": period},
+                {"$set": {
+                    "nav_per_share": nav_val,
+                    "total_assets": total_assets * 1000,
+                    "total_liabilities": total_liabilities * 1000,
+                    "total_equity": total_equity * 1000,
+                    "updated_at": datetime.now(),
+                }},
+                upsert=True,
+            ))
+            log.info(f"  [{sid}] {row.get('公司名稱', '')} NAV {period}: {nav_val}")
+
+        time.sleep(1)
+
+    if ops:
+        result = db["financial"].bulk_write(ops)
+        log.info(f"Financial: upserted={result.upserted_count}, modified={result.modified_count}")
+    else:
+        log.warning("No matching financial records for target stocks")
+
+
 # --------------- Orchestration ---------------
 def run_all(db):
     log.info(f"Starting scrape for stocks: {STOCK_IDS}")
-    scrape_monthly_revenue(db, STOCK_IDS, months=15)
-    scrape_financial(db, STOCK_IDS, quarters=8)
+
+    scrape_monthly_revenue(db, STOCK_IDS)
+    scrape_financial(db, STOCK_IDS)
+
+    # Log completion
     db["scrape_log"].insert_one({
-        "timestamp": datetime.utcnow(),
+        "timestamp": datetime.now(),
         "stocks": STOCK_IDS,
         "status": "completed",
     })
@@ -358,11 +320,10 @@ def main():
     if "--watch" in sys.argv:
         import schedule as sched
 
-        log.info(f"Watch mode: running now, then daily at {SCHEDULE_HOUR}:00 Taiwan time")
+        log.info(f"Watch mode: running now, then daily at {SCHEDULE_HOUR}:00")
         run_all(db)
 
-        utc_hour = (SCHEDULE_HOUR - 8) % 24
-        sched.every().day.at(f"{utc_hour:02d}:00").do(run_all, db)
+        sched.every().day.at(f"{SCHEDULE_HOUR:02d}:00").do(run_all, db)
 
         while True:
             sched.run_pending()
