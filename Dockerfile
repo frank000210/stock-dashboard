@@ -1,7 +1,8 @@
-FROM node:20-alpine
+FROM python:3.12-slim
 WORKDIR /app
-COPY package*.json ./
-RUN npm install --omit=dev
-COPY . .
-EXPOSE 3000
-CMD ["node", "server.js"]
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY server.py analyzer.py index.html ./
+ENV PORT=8080
+EXPOSE 8080
+CMD ["python3", "server.py"]
